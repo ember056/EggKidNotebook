@@ -1,0 +1,26 @@
+builtin_models:
+  - id: builtin-qwen3-embedding-4b
+    type: Embedding
+    source: remote
+    is_default: true
+    name: ${EMBEDDING_MODEL_NAME}
+    description: Self-hosted Qwen3 embedding model for EggKidNotebook.
+    parameters:
+      base_url: ${EMBEDDING_BASE_URL}
+      api_key: ${EMBEDDING_API_KEY}
+      provider: generic
+      embedding_parameters:
+        dimension: 2560
+        truncate_prompt_tokens: 0
+        supports_dimension_override: false
+
+  - id: builtin-bge-reranker-v2-m3
+    type: Rerank
+    source: remote
+    is_default: true
+    name: ${RERANK_MODEL_NAME}
+    description: Self-hosted BGE reranker for EggKidNotebook.
+    parameters:
+      base_url: ${RERANK_BASE_URL}
+      api_key: ${RERANK_API_KEY}
+      provider: generic
