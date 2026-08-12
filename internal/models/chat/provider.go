@@ -150,6 +150,9 @@ func (deepseekProvider) Name() provider.ProviderName { return provider.ProviderD
 // Native DeepSeek cache counters are not represented by go-openai v1.41.2;
 // use the raw path so prompt_cache_hit_tokens/miss_tokens remain observable.
 func (deepseekProvider) ForceRawHTTP() bool { return true }
+func (deepseekProvider) Thinking() ThinkingStrategy {
+	return thinkingTypeField{}
+}
 func (deepseekProvider) ShapeRequest(req *openai.ChatCompletionRequest, opts *ChatOptions, _ bool) {
 	if opts != nil && opts.ToolChoice != "" {
 		req.ToolChoice = nil

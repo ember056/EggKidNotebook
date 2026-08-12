@@ -50,8 +50,10 @@ export function defaultThinkingControl(
       return 'chat_template_kwargs'
     case 'volcengine':
       return 'thinking_type'
+    case 'deepseek':
+      return 'thinking_type'
     default:
-      // openai, azure_openai, anthropic, zhipu, deepseek, gemini, siliconflow,
+      // openai, azure_openai, anthropic, zhipu, gemini, siliconflow,
       // hunyuan, moonshot, openrouter, weknoracloud, … → baseProvider / noThinking
       return 'none'
   }

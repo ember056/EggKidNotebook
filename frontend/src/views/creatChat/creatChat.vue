@@ -1,5 +1,10 @@
 <template>
-    <div class="dialogue-wrap">
+    <div class="dialogue-wrap" :class="{ 'is-studio-collapsed': studioSidebarCollapsed }">
+        <StudioSidebar
+            :disabled="false"
+            @use-template="handleStudioTemplate"
+            @collapse-change="handleStudioCollapseChange"
+        />
         <div class="dialogue-answers">
             <div class="dialogue-title" style="--wails-draggable: drag">
                 <span style="--wails-draggable: drag">{{ $t('createChat.title') }}</span>
@@ -58,6 +63,7 @@
 import { ref, watch, onMounted, nextTick, computed } from 'vue';
 import ContextualGuide from '@/components/ContextualGuide.vue';
 import InputField from '@/components/Input-field.vue';
+import StudioSidebar from '@/components/StudioSidebar.vue';
 import { createSessions } from "@/api/chat/index";
 import { getSuggestedQuestions } from "@/api/agent/index";
 import type { SuggestedQuestion } from "@/api/agent/index";
@@ -88,6 +94,7 @@ const sqLoading = ref(true);
 const sqCardsRevealed = ref(false);
 const sqRenderKey = ref(0);
 const sqContainerRef = ref<HTMLElement | null>(null);
+const studioSidebarCollapsed = ref(false);
 let suggestedQuestionsFetchId = 0;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -185,6 +192,15 @@ const handleSuggestedQuestionClick = (question: string) => {
     inputFieldRef.value?.triggerSend(question);
 };
 
+const handleStudioTemplate = (prompt: string) => {
+    if (!prompt) return;
+    inputFieldRef.value?.triggerSend(prompt);
+};
+
+const handleStudioCollapseChange = (collapsed: boolean) => {
+    studioSidebarCollapsed.value = Boolean(collapsed);
+};
+
 const sendMsg = (value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = []) => {
     createNewSession(value, modelId, mentionedItems, imageFiles, attachmentFiles);
 }
@@ -248,7 +264,20 @@ const handleKBEditorSuccess = (kbId: string) => {
     display: flex;
     justify-content: center;
     align-items: center;
+    box-sizing: border-box;
+    padding-right: 348px;
+    transition: padding-right 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
     // position: relative;
+
+    &.is-studio-collapsed {
+        padding-right: 64px;
+    }
+}
+
+@media (max-width: 1279px) {
+    .dialogue-wrap {
+        padding-right: 0;
+    }
 }
 
 .dialogue-answers {

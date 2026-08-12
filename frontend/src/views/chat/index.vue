@@ -3,8 +3,16 @@
         'is-embedded': embeddedMode,
         'is-sidebar-collapsed': uiStore.sidebarCollapsed,
         'has-references-panel': referencesDrawerVisible,
+        'has-studio-sidebar': studioSidebarVisible,
+        'is-studio-collapsed': studioSidebarCollapsed,
     }">
         <ChatHeader v-if="!embeddedMode" :session="currentSession" :has-references-panel="referencesDrawerVisible" />
+        <StudioSidebar
+            v-if="studioSidebarVisible"
+            :disabled="isReplying"
+            @use-template="handleStudioTemplate"
+            @collapse-change="handleStudioCollapseChange"
+        />
         <div ref="scrollContainer" class="chat_scroll_box" @scroll="handleScroll">
             <div class="msg_list" :class="{ 'is-embedded': embeddedMode }">
                 <!-- 消息列表骨架屏 -->
@@ -148,6 +156,7 @@ import ChatReferencesDrawer from '@/components/ChatReferencesDrawer.vue';
 import ChatAttachmentPreviewDrawer from '@/components/ChatAttachmentPreviewDrawer.vue';
 import FollowUpSuggestions from '@/components/chat/FollowUpSuggestions.vue';
 import ChatHeader from '@/components/ChatHeader.vue';
+import StudioSidebar from '@/components/StudioSidebar.vue';
 import {
     notifySessionMutation,
     SESSION_MUTATION_EVENT,
@@ -242,6 +251,8 @@ const created_at = ref('');
 const limit = ref(20);
 const messagesList = reactive([]);
 const isReplying = ref(false);
+const studioSidebarCollapsed = ref(false);
+const studioSidebarVisible = computed(() => !props.embeddedMode && !referencesDrawerVisible.value);
 const currentAssistantMessageId = ref(''); // 当前正在生成的 assistant message ID
 // True only while attaching to an in-flight *IM-originated* reply via continue-stream.
 // Such replies are generated on the IM side and never stream through this server, so
@@ -336,6 +347,19 @@ const handleSuggestedQuestionClick = (question) => {
     } else {
         sendMsg(question);
     }
+};
+
+const handleStudioTemplate = (prompt) => {
+    if (!prompt || isReplying.value) return;
+    if (inputFieldRef.value?.triggerSend) {
+        inputFieldRef.value.triggerSend(prompt);
+    } else {
+        sendMsg(prompt);
+    }
+};
+
+const handleStudioCollapseChange = (collapsed) => {
+    studioSidebarCollapsed.value = Boolean(collapsed);
 };
 
 const resolveAssistantMessageId = (message) => message?.assistant_message_id || message?.id;
@@ -1054,6 +1078,25 @@ onBeforeRouteUpdate((to, from, next) => {
     &:not(.is-embedded) {
         @media (min-width: 960px) {
             transition: padding-right 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
+        }
+    }
+
+    &.has-studio-sidebar:not(.is-embedded) {
+        @media (min-width: 1280px) {
+            padding-right: 348px;
+            box-sizing: border-box;
+        }
+    }
+
+    &.has-studio-sidebar.is-studio-collapsed:not(.is-embedded) {
+        @media (min-width: 1280px) {
+            padding-right: 64px;
+        }
+    }
+
+    &.has-studio-sidebar:not(.is-embedded) {
+        @media (max-width: 1279px) {
+            padding-right: 0;
         }
     }
 

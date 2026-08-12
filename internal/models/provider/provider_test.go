@@ -41,6 +41,7 @@ func TestDetectProvider(t *testing.T) {
 		{"https://router.requesty.ai/v1", ProviderRequesty},
 		{"https://dashscope.aliyuncs.com/compatible-mode/v1", ProviderAliyun},
 		{"https://open.bigmodel.cn/api/paas/v4", ProviderZhipu},
+		{"https://api.deepseek.com", ProviderDeepSeek},
 		{"https://api.deepseek.com/v1", ProviderDeepSeek},
 		{"https://generativelanguage.googleapis.com/v1beta/openai", ProviderGemini},
 		{"https://ark.cn-beijing.volces.com/api/v3", ProviderVolcengine},

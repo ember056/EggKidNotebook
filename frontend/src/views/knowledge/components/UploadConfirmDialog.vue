@@ -158,6 +158,41 @@
 
             <div class="config-panel">
               <div class="content-wrapper upload-confirm-content">
+                  <div v-show="activeSection === 'strategy'" class="section" data-section="strategy">
+                    <div class="section-content">
+                      <div class="section-header">
+                        <h2 class="section-title">处理策略</h2>
+                        <p class="section-desc">
+                          给大文档一个“先入库、后精修”的入口：先保证可搜索可问答，再按需要打开更耗时的 Wiki 增强能力。
+                        </p>
+                      </div>
+                      <div v-if="largeDocumentHintVisible" class="section-notice strategy-notice">
+                        <t-icon name="info-circle-filled" />
+                        <span>检测到较大的文件或批量上传，建议先用“快速入库”，解析完成后再对重点文档重解析为“深度分析”。</span>
+                      </div>
+                      <div class="strategy-grid">
+                        <button
+                          v-for="preset in processingPresetOptions"
+                          :key="preset.key"
+                          type="button"
+                          class="strategy-card"
+                          :class="{ active: uiState.processingPreset === preset.key }"
+                          @click="applyProcessingPreset(preset.key)"
+                        >
+                          <span class="strategy-card__icon">
+                            <t-icon :name="preset.icon" />
+                          </span>
+                          <span class="strategy-card__body">
+                            <span class="strategy-card__title">{{ preset.title }}</span>
+                            <span class="strategy-card__desc">{{ preset.desc }}</span>
+                            <span class="strategy-card__meta">{{ preset.meta }}</span>
+                          </span>
+                          <t-icon v-if="uiState.processingPreset === preset.key" class="strategy-card__check" name="check-circle-filled" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
                   <div v-show="activeSection === 'tags'" class="section">
                     <div class="section-content">
                       <div class="section-header">
@@ -576,7 +611,8 @@ import type {
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']
 const AUDIO_EXTENSIONS = ['mp3', 'wav', 'm4a', 'flac', 'ogg']
 
-type ConfigSectionKey = 'tags' | 'parser' | 'chunking' | 'multimodal' | 'asr' | 'question' | 'graph'
+type ProcessingPresetKey = 'fast' | 'standard' | 'deep'
+type ConfigSectionKey = 'strategy' | 'tags' | 'parser' | 'chunking' | 'multimodal' | 'asr' | 'question' | 'graph'
 type IssueSectionKey = 'multimodal' | 'asr'
 
 interface ChunkingUIConfig {
@@ -598,6 +634,7 @@ interface ChunkingUIConfig {
 }
 
 interface UploadUIState {
+  processingPreset: ProcessingPresetKey
   chunkingConfig: ChunkingUIConfig
   multimodalConfig: { enabled: boolean; vllmModelId: string; descriptionLanguage?: string; customInstructions?: string }
   asrConfig: { enabled: boolean; modelId: string; language: string }
@@ -815,6 +852,41 @@ const batchFileExts = computed(() => {
 
 const hasPdf = computed(() => batchFileExts.value.includes('pdf'))
 
+const largeDocumentHintVisible = computed(() => {
+  const LARGE_FILE_BYTES = 25 * 1024 * 1024
+  return localFiles.value.some(file => file.size >= LARGE_FILE_BYTES) || batchItemCount.value >= 8
+})
+
+const processingPresetOptions: Array<{
+  key: ProcessingPresetKey
+  icon: string
+  title: string
+  desc: string
+  meta: string
+}> = [
+  {
+    key: 'fast',
+    icon: 'queue',
+    title: '快速入库',
+    desc: '适合超大 PDF、批量文件和今天先要能问起来的资料。',
+    meta: '大分块 · 关闭问题生成/图谱 · 最省时',
+  },
+  {
+    key: 'standard',
+    icon: 'file-copy',
+    title: '标准 Wiki',
+    desc: '适合日常文档，保留问答体验与解析成本之间的平衡。',
+    meta: '中等分块 · 生成 3 个问题 · 沿用知识库图谱设置',
+  },
+  {
+    key: 'deep',
+    icon: 'chart-bubble',
+    title: '深度分析',
+    desc: '适合核心规范、方案文档、复盘材料等需要结构化沉淀的内容。',
+    meta: '细分块 · 生成 5 个问题 · 尽量开启图谱抽取',
+  },
+]
+
 const chunkingStrategyOptions = computed(() => [
   { label: t('knowledgeEditor.chunking.strategies.auto.label'), value: 'auto' },
   { label: t('knowledgeEditor.chunking.strategies.heading.label'), value: 'heading' },
@@ -919,6 +991,7 @@ const navItems = computed(() => {
     })
   }
 
+  push('strategy', 'control-platform', '处理策略')
   if (props.mode !== 'reparse') {
     push('tags', 'tag', t('uploadConfirm.tabTags'))
   }
@@ -948,6 +1021,10 @@ function getSectionNavStatus(
   issue?: boolean,
 ): { status: string; statusTone?: 'warning' | 'error' | 'muted' } {
   switch (key) {
+    case 'strategy': {
+      const preset = processingPresetOptions.find(item => item.key === uiState.value.processingPreset)
+      return { status: preset?.title || '标准 Wiki' }
+    }
     case 'tags':
       if (selectedTagIds.value.length === 0) {
         return { status: t('uploadConfirm.summaryNoTags'), statusTone: 'muted' }
@@ -1041,10 +1118,9 @@ const canConfirm = computed(() => {
 })
 
 function getDefaultSection(): ConfigSectionKey {
-  if (props.mode === 'reparse') return 'parser'
   if (issueSectionKeys.value.has('multimodal')) return 'multimodal'
   if (issueSectionKeys.value.has('asr')) return 'asr'
-  return 'tags'
+  return 'strategy'
 }
 
 function goToSection(key: ConfigSectionKey) {
@@ -1054,8 +1130,49 @@ function goToSection(key: ConfigSectionKey) {
   })
 }
 
+function applyProcessingPreset(preset: ProcessingPresetKey) {
+  const s = uiState.value
+  s.processingPreset = preset
+  s.chunkingConfig.strategy = 'auto'
+  s.chunkingConfig.enableParentChild = true
+  s.chunkingConfig.parentChunkSize = 4096
+
+  if (preset === 'fast') {
+    s.chunkingConfig.chunkSize = 1200
+    s.chunkingConfig.chunkOverlap = 80
+    s.chunkingConfig.childChunkSize = 512
+    s.questionGenerationConfig.enabled = false
+    s.questionGenerationConfig.questionCount = 1
+    s.nodeExtractConfig.enabled = false
+    s.graphEnabled = false
+    return
+  }
+
+  if (preset === 'deep') {
+    s.chunkingConfig.chunkSize = 512
+    s.chunkingConfig.chunkOverlap = 120
+    s.chunkingConfig.childChunkSize = 384
+    s.questionGenerationConfig.enabled = true
+    s.questionGenerationConfig.questionCount = 5
+    if (isGraphDatabaseEnabled.value) {
+      s.graphEnabled = true
+      s.nodeExtractConfig.enabled = true
+    }
+    return
+  }
+
+  s.chunkingConfig.chunkSize = 800
+  s.chunkingConfig.chunkOverlap = 100
+  s.chunkingConfig.childChunkSize = 384
+  s.questionGenerationConfig.enabled = true
+  s.questionGenerationConfig.questionCount = 3
+  s.graphEnabled = Boolean(props.kbInfo?.indexing_strategy?.graph_enabled)
+  s.nodeExtractConfig.enabled = Boolean(s.graphEnabled && props.kbInfo?.extract_config?.enabled)
+}
+
 function createDefaultUIState(): UploadUIState {
   return {
+    processingPreset: 'standard',
     chunkingConfig: {
       chunkSize: 512,
       chunkOverlap: 80,
@@ -1092,6 +1209,7 @@ function initFromKbInfo(kb: any) {
   }
 
   uiState.value = {
+    processingPreset: 'standard',
     chunkingConfig: {
       chunkSize: kb.chunking_config?.chunk_size || 512,
       chunkOverlap: kb.chunking_config?.chunk_overlap || 80,
@@ -1987,6 +2105,90 @@ const handleConfirm = () => {
     font-size: 14px;
     line-height: 22px;
     color: var(--td-text-color-placeholder);
+  }
+}
+
+.strategy-notice {
+  margin-bottom: 18px;
+}
+
+.strategy-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.strategy-card {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 156px;
+  padding: 18px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 14px;
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease, background 0.16s ease;
+
+  &:hover {
+    border-color: var(--td-brand-color-5);
+    box-shadow: 0 8px 20px rgba(0, 82, 217, 0.1);
+    transform: translateY(-1px);
+  }
+
+  &.active {
+    border-color: var(--td-brand-color);
+    background: linear-gradient(180deg, rgba(0, 82, 217, 0.08), rgba(0, 82, 217, 0.02));
+    box-shadow: inset 0 0 0 1px rgba(0, 82, 217, 0.14);
+  }
+
+  &__icon {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    background: var(--td-brand-color-light);
+    color: var(--td-brand-color);
+    font-size: 18px;
+  }
+
+  &__body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  &__title {
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  &__desc {
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--td-text-color-secondary);
+  }
+
+  &__meta {
+    margin-top: auto;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--td-text-color-placeholder);
+  }
+
+  &__check {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    color: var(--td-brand-color);
+    font-size: 18px;
   }
 }
 

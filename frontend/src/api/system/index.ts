@@ -517,6 +517,38 @@ export async function listSystemAuditLog(
   return (await get(url)) as unknown as ListAuditLogResponse
 }
 
+// ---- Platform diagnostics (system-scope) ----
+
+export type DiagnosticStatus = 'ok' | 'warning' | 'error' | 'disabled'
+
+export interface DiagnosticCheck {
+  key: string
+  name: string
+  status: DiagnosticStatus
+  message?: string
+  latency_ms?: number
+  metadata?: Record<string, unknown>
+  checked_at: string
+  remediation?: string
+}
+
+export interface SystemDiagnosticsResponse {
+  status: DiagnosticStatus
+  generated_at: string
+  uptime_seconds?: number
+  checks: DiagnosticCheck[]
+}
+
+/**
+ * Read-only platform health snapshot. It intentionally does not call any
+ * token-consuming model or parser operations; expensive subsystems are checked
+ * by connection/registry state only.
+ */
+export async function getSystemDiagnostics(): Promise<SystemDiagnosticsResponse> {
+  const response = await get('/api/v1/system/admin/diagnostics')
+  return response as unknown as SystemDiagnosticsResponse
+}
+
 // ---- Runtime queue observability (system-scope) ----
 
 /**

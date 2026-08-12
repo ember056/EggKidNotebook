@@ -279,6 +279,9 @@ func RegisterSystemAdminRoutes(
 		g.apiKeyRoute(adminRoutes, http.MethodGet, "/runtime/queues",
 			apiKeyPlatform(types.APIKeyCapabilitySystemRuntimeRead, types.APIKeyCapabilitySystemRuntimeManage),
 			handler.GetRuntimeQueues)
+		g.apiKeyRoute(adminRoutes, http.MethodGet, "/diagnostics",
+			apiKeyPlatform(types.APIKeyCapabilitySystemRuntimeRead, types.APIKeyCapabilitySystemRuntimeManage),
+			handler.GetSystemDiagnostics)
 		g.apiKeyRoute(adminRoutes, http.MethodGet, "/runtime/queues/:queue/tasks",
 			apiKeyPlatform(types.APIKeyCapabilitySystemRuntimeRead, types.APIKeyCapabilitySystemRuntimeManage),
 			handler.ListRuntimeTasks)

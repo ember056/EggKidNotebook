@@ -120,6 +120,16 @@ func TestBuildOutbound_Thinking(t *testing.T) {
 		assert.Contains(t, js, `"enabled"`)
 	})
 
+	t.Run("deepseek thinking enabled", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderDeepSeek), "deepseek-v4-flash", nil)
+		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(true)}, true)
+		require.NoError(t, err)
+		require.True(t, useRaw)
+		js := mustJSON(t, body)
+		assert.Contains(t, js, `"thinking"`)
+		assert.Contains(t, js, `"enabled"`)
+	})
+
 	t.Run("lkeap deepseek-v3 emits thinking type", func(t *testing.T) {
 		c := newOutboundChat(t, string(provider.ProviderLKEAP), "deepseek-v3.1", nil)
 		body, _, useRaw, err := c.buildOutbound(msgs, &ChatOptions{Thinking: ptrBool(false)}, true)

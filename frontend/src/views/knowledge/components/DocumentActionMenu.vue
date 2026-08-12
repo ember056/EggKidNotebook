@@ -48,7 +48,7 @@ const fileName = computed(() => props.item.file_name || props.item.title || prop
   </div>
 
   <!-- 查看处理过程 -->
-  <div v-if="traceVisible" class="doc-action-menu-item" @click.stop="emit('view-trace')">
+  <div v-if="item.id" class="doc-action-menu-item" @click.stop="emit('view-trace')">
     <t-icon class="icon" name="chart-bar" />
     <span>{{ $t('knowledgeStages.viewTrace') }}</span>
   </div>

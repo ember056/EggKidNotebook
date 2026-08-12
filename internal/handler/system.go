@@ -29,6 +29,8 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
+	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
 )
 
 type runtimeKnowledgeCanceller interface {
@@ -38,6 +40,8 @@ type runtimeKnowledgeCanceller interface {
 // SystemHandler handles system-related requests
 type SystemHandler struct {
 	cfg              *config.Config
+	db               *gorm.DB
+	redisClient      *redis.Client
 	neo4jDriver      neo4j.Driver
 	documentReader   interfaces.DocumentReader
 	tenantSvc        interfaces.TenantService
@@ -66,6 +70,8 @@ type SystemHandler struct {
 
 // NewSystemHandler creates a new system handler
 func NewSystemHandler(cfg *config.Config,
+	db *gorm.DB,
+	redisClient *redis.Client,
 	neo4jDriver neo4j.Driver,
 	documentReader interfaces.DocumentReader,
 	tenantSvc interfaces.TenantService,
@@ -79,6 +85,8 @@ func NewSystemHandler(cfg *config.Config,
 ) *SystemHandler {
 	return &SystemHandler{
 		cfg:                cfg,
+		db:                 db,
+		redisClient:        redisClient,
 		neo4jDriver:        neo4jDriver,
 		documentReader:     documentReader,
 		tenantSvc:          tenantSvc,
@@ -293,6 +301,33 @@ type GetSystemInfoResponse struct {
 	UptimeSeconds int64 `json:"uptime_seconds,omitempty"`
 }
 
+type DiagnosticStatus string
+
+const (
+	DiagnosticStatusOK       DiagnosticStatus = "ok"
+	DiagnosticStatusWarning  DiagnosticStatus = "warning"
+	DiagnosticStatusError    DiagnosticStatus = "error"
+	DiagnosticStatusDisabled DiagnosticStatus = "disabled"
+)
+
+type DiagnosticCheck struct {
+	Key         string           `json:"key"`
+	Name        string           `json:"name"`
+	Status      DiagnosticStatus `json:"status"`
+	Message     string           `json:"message,omitempty"`
+	LatencyMS   int64            `json:"latency_ms,omitempty"`
+	Metadata    map[string]any   `json:"metadata,omitempty"`
+	CheckedAt   string           `json:"checked_at"`
+	Remediation string           `json:"remediation,omitempty"`
+}
+
+type SystemDiagnosticsResponse struct {
+	Status        DiagnosticStatus  `json:"status"`
+	GeneratedAt   string            `json:"generated_at"`
+	UptimeSeconds int64             `json:"uptime_seconds,omitempty"`
+	Checks        []DiagnosticCheck `json:"checks"`
+}
+
 // 编译时注入的版本信息
 var (
 	Version   = "unknown"
@@ -371,6 +406,286 @@ func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 		"msg":  "success",
 		"data": response,
 	})
+}
+
+// GetSystemDiagnostics godoc
+// @Summary      Get platform diagnostics
+// @Description  Returns a read-only health snapshot for core infrastructure. SystemAdmin only.
+// @Tags         System Admin
+// @Produce      json
+// @Success      200 {object} SystemDiagnosticsResponse
+// @Router       /system/admin/diagnostics [get]
+func (h *SystemHandler) GetSystemDiagnostics(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+	generatedAt := time.Now().UTC()
+	checks := []DiagnosticCheck{
+		h.diagnosticApp(generatedAt),
+		h.diagnosticDatabase(ctx, generatedAt),
+		h.diagnosticRedis(ctx, generatedAt),
+		h.diagnosticDocReader(ctx, generatedAt),
+		h.diagnosticQueues(ctx, generatedAt),
+		h.diagnosticMigrations(generatedAt),
+		h.diagnosticParserEngines(ctx, generatedAt),
+		h.diagnosticStorage(c, generatedAt),
+	}
+
+	status := DiagnosticStatusOK
+	for _, check := range checks {
+		switch check.Status {
+		case DiagnosticStatusError:
+			status = DiagnosticStatusError
+		case DiagnosticStatusWarning:
+			if status != DiagnosticStatusError {
+				status = DiagnosticStatusWarning
+			}
+		}
+	}
+
+	var uptimeSec int64
+	if boot := runtime.ServerStartedAt(); !boot.IsZero() {
+		uptimeSec = int64(runtime.ServerUptime().Seconds())
+	}
+
+	c.JSON(http.StatusOK, SystemDiagnosticsResponse{
+		Status:        status,
+		GeneratedAt:   generatedAt.Format(time.RFC3339),
+		UptimeSeconds: uptimeSec,
+		Checks:        checks,
+	})
+}
+
+func newDiagnosticCheck(key, name string, status DiagnosticStatus, checkedAt time.Time) DiagnosticCheck {
+	return DiagnosticCheck{
+		Key:       key,
+		Name:      name,
+		Status:    status,
+		CheckedAt: checkedAt.Format(time.RFC3339),
+	}
+}
+
+func (h *SystemHandler) diagnosticApp(checkedAt time.Time) DiagnosticCheck {
+	check := newDiagnosticCheck("app", "Application API", DiagnosticStatusOK, checkedAt)
+	check.Message = "API process is running"
+	check.Metadata = map[string]any{
+		"version":    Version,
+		"edition":    Edition,
+		"commit_id":  CommitID,
+		"build_time": BuildTime,
+		"go_version": GoVersion,
+	}
+	if boot := runtime.ServerStartedAt(); !boot.IsZero() {
+		check.Metadata["started_at"] = boot.UTC().Format(time.RFC3339)
+		check.Metadata["uptime_seconds"] = int64(runtime.ServerUptime().Seconds())
+	}
+	return check
+}
+
+func (h *SystemHandler) diagnosticDatabase(ctx context.Context, checkedAt time.Time) DiagnosticCheck {
+	check := newDiagnosticCheck("database", "Database", DiagnosticStatusError, checkedAt)
+	if h.db == nil {
+		check.Message = "database handle is not initialized"
+		check.Remediation = "Check DB_DRIVER, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, and app startup logs."
+		return check
+	}
+	sqlDB, err := h.db.DB()
+	if err != nil {
+		check.Message = err.Error()
+		check.Remediation = "Check database driver and connection initialization."
+		return check
+	}
+	start := time.Now()
+	pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := sqlDB.PingContext(pingCtx); err != nil {
+		check.LatencyMS = time.Since(start).Milliseconds()
+		check.Message = err.Error()
+		check.Remediation = "Verify PostgreSQL/SQLite is reachable and credentials match the app .env."
+		return check
+	}
+	stats := sqlDB.Stats()
+	check.Status = DiagnosticStatusOK
+	check.LatencyMS = time.Since(start).Milliseconds()
+	check.Message = "database ping succeeded"
+	check.Metadata = map[string]any{
+		"driver":               h.db.Dialector.Name(),
+		"open_connections":     stats.OpenConnections,
+		"in_use":               stats.InUse,
+		"idle":                 stats.Idle,
+		"wait_count":           stats.WaitCount,
+		"max_open_connections": stats.MaxOpenConnections,
+	}
+	return check
+}
+
+func (h *SystemHandler) diagnosticRedis(ctx context.Context, checkedAt time.Time) DiagnosticCheck {
+	check := newDiagnosticCheck("redis", "Redis / Task backend", DiagnosticStatusDisabled, checkedAt)
+	if strings.TrimSpace(os.Getenv("REDIS_ADDR")) == "" {
+		check.Message = "Redis is not configured; Lite inline task mode is expected."
+		return check
+	}
+	if h.redisClient == nil {
+		check.Status = DiagnosticStatusError
+		check.Message = "REDIS_ADDR is configured but redis client is not initialized"
+		check.Remediation = "Check Redis container status, REDIS_ADDR, REDIS_PASSWORD, REDIS_DB, and app logs."
+		return check
+	}
+	start := time.Now()
+	pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := h.redisClient.Ping(pingCtx).Err(); err != nil {
+		check.Status = DiagnosticStatusError
+		check.LatencyMS = time.Since(start).Milliseconds()
+		check.Message = err.Error()
+		check.Remediation = "Restart Redis or verify network/TLS/password settings."
+		return check
+	}
+	check.Status = DiagnosticStatusOK
+	check.LatencyMS = time.Since(start).Milliseconds()
+	check.Message = "redis ping succeeded"
+	check.Metadata = map[string]any{"addr": os.Getenv("REDIS_ADDR")}
+	return check
+}
+
+func (h *SystemHandler) diagnosticDocReader(ctx context.Context, checkedAt time.Time) DiagnosticCheck {
+	check := newDiagnosticCheck("docreader", "Document reader", DiagnosticStatusDisabled, checkedAt)
+	addr, transport := h.getDocReaderConnInfo()
+	check.Metadata = map[string]any{"addr": addr, "transport": transport}
+	if h.documentReader == nil {
+		check.Message = "document reader is not initialized"
+		check.Remediation = "Check docreader service/container and DOCREADER_ADDR."
+		return check
+	}
+	if h.documentReader.IsConnected() {
+		check.Status = DiagnosticStatusOK
+		check.Message = "document reader is connected"
+	} else if addr == "" {
+		check.Status = DiagnosticStatusWarning
+		check.Message = "DOCREADER_ADDR is empty; only built-in/simple parsers may be available."
+	} else {
+		check.Status = DiagnosticStatusError
+		check.Message = "document reader is configured but not connected"
+		check.Remediation = "Restart docreader/app or run the parser reconnect action from settings."
+	}
+	if ctx.Err() != nil {
+		check.Status = DiagnosticStatusError
+		check.Message = ctx.Err().Error()
+	}
+	return check
+}
+
+func (h *SystemHandler) diagnosticQueues(ctx context.Context, checkedAt time.Time) DiagnosticCheck {
+	check := newDiagnosticCheck("queues", "Background queues", DiagnosticStatusDisabled, checkedAt)
+	if h.taskInspector == nil {
+		check.Message = "task inspector is not initialized"
+		return check
+	}
+	start := time.Now()
+	stats, supported, err := h.taskInspector.QueueStats(ctx)
+	check.LatencyMS = time.Since(start).Milliseconds()
+	if err != nil {
+		check.Status = DiagnosticStatusError
+		check.Message = err.Error()
+		check.Remediation = "Check Redis/asynq availability and worker startup logs."
+		return check
+	}
+	if !supported {
+		check.Message = "queue inspection is unavailable in Lite inline task mode"
+		return check
+	}
+	pending, active, retry, archived := 0, 0, 0, 0
+	for _, stat := range stats {
+		pending += stat.Pending
+		active += stat.Active
+		retry += stat.Retry
+		archived += stat.Archived
+	}
+	check.Status = DiagnosticStatusOK
+	check.Message = "queue inspection succeeded"
+	if retry > 0 || archived > 0 {
+		check.Status = DiagnosticStatusWarning
+		check.Message = "queue inspection succeeded with retry or archived tasks"
+		check.Remediation = "Open Runtime Queues to inspect failed/retry tasks and their last errors."
+	}
+	check.Metadata = map[string]any{
+		"queue_count": len(stats),
+		"pending":     pending,
+		"active":      active,
+		"retry":       retry,
+		"archived":    archived,
+	}
+	return check
+}
+
+func (h *SystemHandler) diagnosticMigrations(checkedAt time.Time) DiagnosticCheck {
+	check := newDiagnosticCheck("migrations", "Database migrations", DiagnosticStatusOK, checkedAt)
+	if msg := database.CachedMigrationError(); msg != "" {
+		check.Status = DiagnosticStatusError
+		check.Message = msg
+		check.Remediation = "Review migration logs and docs/migration-troubleshooting.md before restarting workers."
+		return check
+	}
+	if ver, dirty, ok := database.CachedMigrationVersion(); ok {
+		check.Message = "migration state is clean"
+		check.Metadata = map[string]any{"version": ver, "dirty": dirty}
+		if dirty {
+			check.Status = DiagnosticStatusError
+			check.Message = "migration state is dirty"
+			check.Remediation = "Fix the failed migration and clear dirty state only after verifying schema consistency."
+		}
+		return check
+	}
+	check.Status = DiagnosticStatusWarning
+	check.Message = "migration version is unknown"
+	return check
+}
+
+func (h *SystemHandler) diagnosticParserEngines(ctx context.Context, checkedAt time.Time) DiagnosticCheck {
+	check := newDiagnosticCheck("parser_engines", "Parser engines", DiagnosticStatusOK, checkedAt)
+	remote := h.fetchRemoteEngines(ctx, h.documentReader, nil)
+	engines := docparser.ListAllEngines(h.documentReader != nil && h.documentReader.IsConnected(), nil, remote)
+	available := 0
+	names := make([]string, 0, len(engines))
+	unavailable := make([]string, 0)
+	for _, engine := range engines {
+		names = append(names, engine.Name)
+		if engine.Available {
+			available++
+		} else {
+			unavailable = append(unavailable, engine.Name)
+		}
+	}
+	check.Message = fmt.Sprintf("%d/%d parser engines available", available, len(engines))
+	check.Metadata = map[string]any{
+		"available":   available,
+		"total":       len(engines),
+		"engines":     names,
+		"unavailable": unavailable,
+	}
+	if len(engines) == 0 || available == 0 {
+		check.Status = DiagnosticStatusError
+		check.Message = "no parser engines are available"
+		check.Remediation = "Check docreader connectivity and parser engine configuration."
+	} else if len(unavailable) > 0 {
+		check.Status = DiagnosticStatusWarning
+		check.Remediation = "Open Parser Engine settings to configure optional engines such as MinerU."
+	}
+	return check
+}
+
+func (h *SystemHandler) diagnosticStorage(c *gin.Context, checkedAt time.Time) DiagnosticCheck {
+	check := newDiagnosticCheck("storage", "Storage", DiagnosticStatusOK, checkedAt)
+	provider := "local"
+	configured := false
+	if h.isMinioConfigured(c) {
+		provider = "minio"
+		configured = true
+	} else if h.isS3Configured(c) {
+		provider = "s3"
+		configured = true
+	}
+	check.Message = fmt.Sprintf("%s storage configuration detected", provider)
+	check.Metadata = map[string]any{"provider": provider, "configured": configured}
+	return check
 }
 
 func (h *SystemHandler) getDocReaderConnInfo() (addr, transport string) {
