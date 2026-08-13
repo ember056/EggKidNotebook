@@ -141,9 +141,25 @@ const isFileDrag = (event: DragEvent): boolean => {
     return Array.from(types).includes('Files')
 }
 
+const isStudioDropTarget = (event: DragEvent): boolean => {
+    const target = event.target as Element | null;
+    if (target?.closest?.('[data-studio-drop-surface="true"]')) return true;
+
+    const x = event.clientX;
+    const y = event.clientY;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+
+    return Array.from(document.querySelectorAll<HTMLElement>('[data-studio-drop-surface="true"]'))
+        .some((element) => {
+            const rect = element.getBoundingClientRect();
+            return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+        });
+}
+
 // 全局拖拽事件处理
 const handleGlobalDragEnter = (event: DragEvent) => {
     if (!isFileDrag(event)) return;
+    if (isStudioDropTarget(event)) return;
     event.preventDefault();
     dragCounter++;
     if (event.dataTransfer) {
@@ -154,6 +170,7 @@ const handleGlobalDragEnter = (event: DragEvent) => {
 
 const handleGlobalDragOver = (event: DragEvent) => {
     if (!isFileDrag(event)) return;
+    if (isStudioDropTarget(event)) return;
     event.preventDefault();
     if (event.dataTransfer) {
         event.dataTransfer.dropEffect = 'copy';
@@ -162,6 +179,7 @@ const handleGlobalDragOver = (event: DragEvent) => {
 
 const handleGlobalDragLeave = (event: DragEvent) => {
     if (!isFileDrag(event)) return;
+    if (isStudioDropTarget(event)) return;
     event.preventDefault();
     dragCounter--;
     if (dragCounter === 0) {
@@ -171,6 +189,7 @@ const handleGlobalDragLeave = (event: DragEvent) => {
 
 const handleGlobalDrop = async (event: DragEvent) => {
     if (!isFileDrag(event)) return;
+    if (isStudioDropTarget(event)) return;
     event.preventDefault();
     dragCounter = 0;
     ismask.value = false;

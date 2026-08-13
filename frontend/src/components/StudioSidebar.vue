@@ -1,5 +1,10 @@
 <template>
-  <aside class="studio-sidebar" :class="{ 'is-collapsed': collapsed }" aria-label="Studio workspace">
+  <aside
+    class="studio-sidebar"
+    :class="{ 'is-collapsed': collapsed }"
+    aria-label="Studio workspace"
+    data-studio-drop-surface="true"
+  >
     <button
       type="button"
       class="studio-toggle"
@@ -93,10 +98,10 @@
             <div
               class="studio-dropzone"
               :class="{ 'is-dragover': isDragOver }"
-              @dragenter.prevent="isDragOver = true"
-              @dragover.prevent="isDragOver = true"
-              @dragleave.prevent="isDragOver = false"
-              @drop.prevent="handleDrop"
+              @dragenter.stop.prevent="handleDragEnter"
+              @dragover.stop.prevent="handleDragOver"
+              @dragleave.stop.prevent="handleDragLeave"
+              @drop.stop.prevent="handleDrop"
               @click="openFilePicker"
             >
               <input ref="referenceInputRef" type="file" class="studio-file-input" multiple @change="handleFileChange" />
@@ -732,6 +737,27 @@ const handleFileChange = async (event: Event) => {
     await addFiles(input.files)
     input.value = ''
   }
+  isDragOver.value = false
+}
+
+const handleDragEnter = (event: DragEvent) => {
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'copy'
+  }
+  isDragOver.value = true
+}
+
+const handleDragOver = (event: DragEvent) => {
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'copy'
+  }
+  isDragOver.value = true
+}
+
+const handleDragLeave = (event: DragEvent) => {
+  const current = event.currentTarget as HTMLElement | null
+  const related = event.relatedTarget as Node | null
+  if (current && related && current.contains(related)) return
   isDragOver.value = false
 }
 
