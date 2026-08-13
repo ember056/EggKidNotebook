@@ -285,6 +285,18 @@
           :srcdoc="previewContent"
           sandbox=""
         />
+        <div v-else-if="isBinaryPreview(previewArtifact)" class="studio-preview__binary">
+          <div class="studio-preview__binary-icon">{{ previewArtifact?.type === 'ppt' ? '📊' : '📈' }}</div>
+          <h3>真实文件已生成</h3>
+          <p>
+            {{ previewArtifact?.filename }} 是可编辑的
+            {{ previewArtifact?.type === 'ppt' ? 'PPTX 演示文稿' : 'XLSX 表格' }}，
+            请下载后用 PowerPoint / WPS / Excel 打开。
+          </p>
+          <t-button v-if="previewArtifact" theme="primary" @click="downloadArtifactRecord(previewArtifact)">
+            下载文件
+          </t-button>
+        </div>
         <pre v-else class="studio-preview__text">{{ previewContent }}</pre>
       </div>
     </t-dialog>
@@ -655,13 +667,23 @@ const regenerateArtifactRecord = async (artifact: StudioArtifact) => {
 
 const previewArtifactRecord = async (artifact: StudioArtifact) => {
   try {
+    previewArtifact.value = artifact
+    if (isBinaryPreview(artifact)) {
+      previewContent.value = ''
+      previewVisible.value = true
+      return
+    }
     const blob = await previewStudioArtifact(artifact.id)
     previewContent.value = await blob.text()
-    previewArtifact.value = artifact
     previewVisible.value = true
   } catch (error: any) {
     MessagePlugin.error(error?.message || '预览失败')
   }
+}
+
+const isBinaryPreview = (artifact: StudioArtifact | null) => {
+  if (!artifact) return false
+  return artifact.type === 'ppt' || artifact.mime_type.includes('spreadsheet')
 }
 
 const downloadArtifactRecord = async (artifact: StudioArtifact) => {
@@ -1311,6 +1333,45 @@ onBeforeUnmount(() => {
   border: 1px solid var(--td-component-stroke);
   border-radius: 12px;
   background: #fff;
+}
+
+.studio-preview__binary {
+  display: flex;
+  min-height: 300px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  padding: 28px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(91, 140, 255, 0.16), transparent 34%),
+    var(--td-bg-color-page);
+  text-align: center;
+
+  h3 {
+    margin: 0;
+    color: var(--td-text-color-primary);
+    font-size: 18px;
+  }
+
+  p {
+    max-width: 460px;
+    margin: 0;
+    color: var(--td-text-color-secondary);
+    line-height: 1.7;
+  }
+}
+
+.studio-preview__binary-icon {
+  display: grid;
+  width: 64px;
+  height: 64px;
+  place-items: center;
+  border-radius: 20px;
+  background: var(--td-brand-color-light);
+  font-size: 30px;
 }
 
 .studio-preview__text {

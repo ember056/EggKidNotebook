@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/base64"
 	stderrors "errors"
 	"fmt"
 	"net/http"
@@ -160,7 +161,24 @@ func (h *StudioArtifactHandler) serveArtifact(c *gin.Context, attachment bool) {
 	filename := url.QueryEscape(artifact.Filename)
 	c.Header("Content-Type", artifact.MimeType)
 	c.Header("Content-Disposition", fmt.Sprintf("%s; filename*=UTF-8''%s", disposition, filename))
-	c.String(http.StatusOK, artifact.Content)
+	content, err := studioArtifactBytes(artifact)
+	if err != nil {
+		c.Error(apperrors.NewInternalServerError("failed to decode studio artifact").WithDetails(err.Error()))
+		return
+	}
+	c.Data(http.StatusOK, artifact.MimeType, content)
+}
+
+func studioArtifactBytes(artifact *types.StudioArtifact) ([]byte, error) {
+	if artifact == nil {
+		return nil, service.ErrStudioArtifactNotFound
+	}
+	if artifact.Metadata != nil {
+		if encoding, _ := artifact.Metadata["content_encoding"].(string); encoding == "base64" {
+			return base64.StdEncoding.DecodeString(artifact.Content)
+		}
+	}
+	return []byte(artifact.Content), nil
 }
 
 func (h *StudioArtifactHandler) writeStudioError(c *gin.Context, err error) {
