@@ -1334,6 +1334,98 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   }))
 })
 
+const slowestStage = computed<StageRowSummary | null>(() => {
+  const finished = stageBreakdown.value
+    .filter((s) => typeof s.duration_ms === 'number' && s.duration_ms > 0)
+    .sort((a, b) => (b.duration_ms || 0) - (a.duration_ms || 0))
+  return finished[0] || null
+})
+
+const runningStage = computed<StageRowSummary | null>(() =>
+  stageBreakdown.value.find((s) => s.status === 'running') || null,
+)
+
+const runningStageNode = computed<SpanNode | null>(() =>
+  stages.value.find((s) => s.status === 'running') || null,
+)
+
+const pendingStages = computed(() =>
+  stageBreakdown.value.filter((s) => s.status === 'pending').length,
+)
+
+const traceDiagnostics = computed(() => {
+  if (!data.value) return null
+  const chips: Array<{ key: string; label: string; value: string; tone: 'info' | 'success' | 'warning' | 'danger' }> = []
+  const tips: string[] = []
+  const status = data.value.parse_status || headerStatus.value || 'unknown'
+
+  chips.push({
+    key: 'status',
+    label: '当前状态',
+    value: headerStatusText.value || localizedStatus(status),
+    tone: status === 'failed' ? 'danger' : status === 'completed' ? 'success' : isLive.value ? 'warning' : 'info',
+  })
+
+  if (runningStage.value) {
+    chips.push({
+      key: 'running',
+      label: '正在执行',
+      value: `${runningStage.value.label} · ${formatDuration(runningStageNode.value ? liveElapsedMs(runningStageNode.value) : runningStage.value.duration_ms)}`,
+      tone: 'warning',
+    })
+    tips.push(`当前主要耗时集中在「${runningStage.value.label}」，如果长时间不变化，优先检查对应 Worker、模型服务和队列积压。`)
+  } else if (data.value.last_error) {
+    chips.push({
+      key: 'failed',
+      label: '失败节点',
+      value: data.value.last_error.name || data.value.last_error.error_code || '未知节点',
+      tone: 'danger',
+    })
+  }
+
+  if (slowestStage.value) {
+    chips.push({
+      key: 'slowest',
+      label: '最慢阶段',
+      value: `${slowestStage.value.label} · ${formatDuration(slowestStage.value.duration_ms)}`,
+      tone: (slowestStage.value.duration_ms || 0) > 60000 ? 'warning' : 'info',
+    })
+  }
+
+  if (pendingStages.value > 0 && isLive.value) {
+    chips.push({
+      key: 'pending',
+      label: '等待阶段',
+      value: `${pendingStages.value} 个`,
+      tone: 'info',
+    })
+  }
+
+  const total = totalMs.value
+  if (total > 0) {
+    chips.push({
+      key: 'total',
+      label: '总耗时',
+      value: formatDuration(total),
+      tone: total > 5 * 60 * 1000 ? 'warning' : 'info',
+    })
+    if (total > 5 * 60 * 1000 && isLive.value) {
+      tips.push('该任务已运行较久。大文件场景建议拆分解析、降低单批并发、启用异步队列与可恢复 checkpoint。')
+    }
+  }
+
+  if (data.value.last_error) {
+    const suggestion = localizedErrorSuggestion(data.value.last_error.error_code)
+    tips.push(suggestion || '请结合最后错误、重试次数和当前阶段判断是否重新解析；如果是模型/DocReader 超时，优先检查服务健康和文件大小。')
+  } else if (!tips.length && data.value.parse_status === 'completed') {
+    tips.push('解析链路已完成。若 Wiki 页面或摘要仍在刷新，通常是后处理异步任务仍在收尾。')
+  } else if (!tips.length) {
+    tips.push('Trace 会持续自动刷新；可点击任意阶段查看输入、输出、错误和 Langfuse 关联元数据。')
+  }
+
+  return { chips, tips }
+})
+
 function normalizeFileType(value: string): string {
   return String(value || '').trim().replace(/^\./, '').toLowerCase()
 }
@@ -1505,6 +1597,27 @@ const processConfigLines = computed<string[]>(() => {
               <span class="kp-attempt-glyph" :class="attemptGlyph(tab.status).cls">{{ attemptGlyph(tab.status).ch
                 }}</span>
             </button>
+          </div>
+
+          <div v-if="traceDiagnostics" class="kp-diagnostics">
+            <div class="kp-diagnostics-title">
+              <t-icon name="system-3" size="14px" />
+              <span>诊断摘要</span>
+            </div>
+            <div class="kp-diagnostics-grid">
+              <div
+                v-for="chip in traceDiagnostics.chips"
+                :key="chip.key"
+                class="kp-diagnostic-chip"
+                :class="`kp-diagnostic-chip-${chip.tone}`"
+              >
+                <span class="kp-diagnostic-chip-label">{{ chip.label }}</span>
+                <span class="kp-diagnostic-chip-value">{{ chip.value }}</span>
+              </div>
+            </div>
+            <ul class="kp-diagnostics-tips">
+              <li v-for="(tip, idx) in traceDiagnostics.tips" :key="idx">{{ tip }}</li>
+            </ul>
           </div>
 
           <div v-if="showLastError && data?.last_error" class="kp-last-error" role="alert">
@@ -1977,6 +2090,89 @@ const processConfigLines = computed<string[]>(() => {
 
 .kp-head-meta-part {
   display: inline;
+}
+
+.kp-diagnostics {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--td-radius-medium);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--td-brand-color-light) 35%, transparent), transparent 48%),
+    var(--td-bg-color-secondarycontainer);
+}
+
+.kp-diagnostics-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+}
+
+.kp-diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.kp-diagnostic-chip {
+  min-width: 0;
+  padding: 7px 9px;
+  border-radius: var(--td-radius-default);
+  background: var(--td-bg-color-container);
+  border-left: 3px solid var(--td-brand-color);
+}
+
+.kp-diagnostic-chip-info {
+  border-left-color: var(--td-brand-color);
+}
+
+.kp-diagnostic-chip-success {
+  border-left-color: var(--td-success-color);
+}
+
+.kp-diagnostic-chip-warning {
+  border-left-color: var(--td-warning-color);
+}
+
+.kp-diagnostic-chip-danger {
+  border-left-color: var(--td-error-color);
+}
+
+.kp-diagnostic-chip-label,
+.kp-diagnostic-chip-value {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kp-diagnostic-chip-label {
+  font-size: 11px;
+  color: var(--td-text-color-secondary);
+}
+
+.kp-diagnostic-chip-value {
+  margin-top: 3px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+}
+
+.kp-diagnostics-tips {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.kp-diagnostics-tips li + li {
+  margin-top: 3px;
 }
 
 .kp-icon-btn {
