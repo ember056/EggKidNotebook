@@ -369,6 +369,7 @@ type studioSlide struct {
 	subtitle string
 	bullets  []string
 	accent   string
+	layout   string
 }
 
 func renderStudioPPTX(title, prompt string, version int) ([]byte, error) {
@@ -410,72 +411,114 @@ func renderStudioPPTX(title, prompt string, version int) ([]byte, error) {
 }
 
 func buildStudioSlides(title, summary string, version int) []studioSlide {
+	contextPoints := studioPromptPoints(summary, []string{
+		"Clarify the business background, audience, and expected decision.",
+		"Extract key evidence from the conversation or knowledge base.",
+		"Turn loose notes into an editable office deliverable.",
+	})
 	return []studioSlide{
 		{
 			title:    title,
-			subtitle: fmt.Sprintf("Studio 自动生成 · v%d", version),
+			subtitle: fmt.Sprintf("Executive-ready office draft · v%d", version),
 			bullets: []string{
-				"面向企业汇报、项目复盘和方案评审",
-				"可下载为真实 PPTX 文件，便于继续编辑",
-				summary,
+				"Built for project reporting, review meetings, and daily office delivery.",
+				"Generated as a real editable PPTX file, ready for PowerPoint or WPS.",
+				contextPoints[0],
 			},
 			accent: "2563EB",
+			layout: "cover",
 		},
 		{
-			title: "背景与问题",
-			bullets: []string{
-				"明确当前业务/项目上下文，避免只停留在零散结论",
-				"识别影响效率、质量、稳定性或协同的核心痛点",
-				"将问题转化为可追踪、可复盘、可验收的改进项",
-			},
-			accent: "7C3AED",
+			title:    "Executive Summary",
+			subtitle: "What this artifact is trying to make clear",
+			bullets:  contextPoints,
+			accent:   "7C3AED",
+			layout:   "summary",
 		},
 		{
-			title: "目标与验收标准",
+			title:    "Goals & Acceptance",
+			subtitle: "Make the work measurable before it becomes busywork",
 			bullets: []string{
-				"定义交付范围：输入、处理链路、输出物和责任人",
-				"设置指标：耗时、准确率、稳定性、可用性、用户体验",
-				"建立兜底策略：重试、降级、人工审核与版本回滚",
+				"Scope: inputs, processing chain, output format, owners, and handoff rules.",
+				"Metrics: latency, accuracy, stability, usability, and review cost.",
+				"Fallback: retry, graceful degradation, manual review, and version rollback.",
 			},
 			accent: "0891B2",
+			layout: "cards",
 		},
 		{
-			title: "核心方案",
+			title:    "Core Solution",
+			subtitle: "A practical path from knowledge input to office output",
 			bullets: []string{
-				"沉淀标准化流程：配置、生成、预览、下载、归档",
-				"增强可观测性：队列雷达、任务 SLA、单文件 Trace",
-				"用 Studio 承接办公产出：PPT、HTML、表格、文档",
+				"Standardize the workflow: configure, generate, preview, download, archive.",
+				"Improve observability: queue radar, task SLA, and per-file trace view.",
+				"Use Studio as the office output layer: PPT, HTML, spreadsheet, and document.",
 			},
 			accent: "16A34A",
+			layout: "flow",
 		},
 		{
-			title: "流程设计",
+			title:    "Processing Blueprint",
+			subtitle: "Separate input, generation, review, and reuse",
 			bullets: []string{
-				"输入：对话上下文、知识库、上传资料、参考模板",
-				"处理：解析、结构化、生成、校验、版本化记录",
-				"输出：可下载文件、可预览页面、可复用记录",
+				"Input: chat context, knowledge base, uploaded references, and template hints.",
+				"Process: parse, structure, generate, validate, and version every artifact.",
+				"Output: downloadable files, previewable pages, and reusable generation records.",
 			},
 			accent: "EA580C",
+			layout: "timeline",
 		},
 		{
-			title: "风险与治理",
+			title:    "Risks & Governance",
+			subtitle: "Design the happy path and the failure path together",
 			bullets: []string{
-				"大文档解析慢：拆分、异步队列、checkpoint、Trace 诊断",
-				"模型调用失败：健康检查、限流、重试、替代模型",
-				"文件管理混乱：生成记录、版本号、批量删除、后续共享",
+				"Large documents: chunking, async queue, checkpoint resume, and trace diagnosis.",
+				"Model failures: health checks, rate limiting, retries, and fallback models.",
+				"File governance: records, versions, batch deletion, sharing, and audit trail.",
 			},
 			accent: "DC2626",
+			layout: "risk",
 		},
 		{
-			title: "下一步计划",
+			title:    "Next Roadmap",
+			subtitle: "From usable demo to enterprise-grade Studio",
 			bullets: []string{
-				"接入真实 LLM 内容生成，让产物从模板走向智能草稿",
-				"支持模板库、企业主题、团队共享与审批流",
-				"继续完善高并发队列治理、SLA 告警和审计闭环",
+				"Connect Studio generation to the configured LLM for content-aware drafts.",
+				"Add template library, corporate themes, team sharing, and approval flow.",
+				"Continue hardening queues, SLA alerts, trace observability, and audit closure.",
 			},
 			accent: "4F46E5",
+			layout: "roadmap",
 		},
 	}
+}
+
+func studioPromptPoints(summary string, fallback []string) []string {
+	candidates := strings.FieldsFunc(summary, func(r rune) bool {
+		return r == '\n' || r == '。' || r == '；' || r == ';' || r == '.' || r == '!' || r == '！' || r == '?' || r == '？'
+	})
+	points := make([]string, 0, 3)
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || candidate == "Generated from the current conversation or knowledge base context" {
+			continue
+		}
+		runes := []rune(candidate)
+		if len(runes) > 88 {
+			candidate = string(runes[:88]) + "..."
+		}
+		points = append(points, candidate)
+		if len(points) == 3 {
+			return points
+		}
+	}
+	for _, item := range fallback {
+		if len(points) == 3 {
+			break
+		}
+		points = append(points, item)
+	}
+	return points
 }
 
 func renderStudioXLSX(title, prompt string, version int) ([]byte, error) {
@@ -640,6 +683,9 @@ func pptxSlideXML(index int, slide studioSlide) string {
 	if accent == "" {
 		accent = "2563EB"
 	}
+	if slide.layout == "cover" {
+		return pptxCoverSlideXML(index, slide, accent)
+	}
 	title := pptxEscape(slide.title)
 	subtitle := pptxEscape(slide.subtitle)
 	if subtitle == "" {
@@ -681,16 +727,118 @@ func pptxSlideXML(index int, slide studioSlide) string {
       %s
       %s
       %s
+      %s
     </p:spTree>
   </p:cSld>
   <p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>
 </p:sld>`,
 		pptxRect(2, "Accent", 0, 0, 12192000, 280000, accent),
-		pptxRect(3, "Panel", 700000, 880000, 10800000, 5100000, "FFFFFF"),
-		pptxTextBox(4, "Title", 1060000, 1040000, 9700000, 650000, title, "111827", 420000, true),
-		pptxTextBox(5, "Subtitle", 1060000, 1660000, 9700000, 360000, subtitle, accent, 185000, false),
-		bulletXML.String()+pptxFooter(index, progress, accent),
+		pptxRect(3, "Canvas", 520000, 720000, 11160000, 5480000, "FFFFFF"),
+		pptxRect(4, "Left Rail", 520000, 720000, 140000, 5480000, accent),
+		pptxTextBox(5, "Title", 960000, 980000, 7600000, 650000, title, "111827", 410000, true),
+		pptxTextBox(6, "Subtitle", 960000, 1580000, 8100000, 360000, subtitle, accent, 175000, false),
+		pptxSlideVisuals(index, slide, accent)+bulletXML.String()+pptxFooter(index, progress, accent),
 	)
+}
+
+func pptxCoverSlideXML(index int, slide studioSlide, accent string) string {
+	title := pptxEscape(slide.title)
+	subtitle := pptxEscape(slide.subtitle)
+	if subtitle == "" {
+		subtitle = "EggKid Studio · Executive-ready office output"
+	}
+	var detail strings.Builder
+	for i, bullet := range slide.bullets {
+		if strings.TrimSpace(bullet) == "" {
+			continue
+		}
+		detail.WriteString(pptxTextBox(30+i, fmt.Sprintf("Cover Point %d", i+1), 980000, 4660000+i*360000, 8500000, 300000, pptxEscape("— "+bullet), "CBD5E1", 150000, false))
+	}
+	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:cSld>
+    <p:bg><p:bgPr><a:solidFill><a:srgbClr val="0F172A"/></a:solidFill></p:bgPr></p:bg>
+    <p:spTree>
+      <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
+      <p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>
+      %s
+      %s
+      %s
+      %s
+      %s
+      %s
+      %s
+    </p:spTree>
+  </p:cSld>
+  <p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>
+</p:sld>`,
+		pptxRect(2, "Accent Bar", 0, 0, 12192000, 360000, accent),
+		pptxRect(3, "Hero Glow 1", 7420000, 900000, 3700000, 3700000, "1D4ED8"),
+		pptxRect(4, "Hero Glow 2", 8500000, 2060000, 2800000, 2800000, "7C3AED"),
+		pptxRect(5, "Title Underline", 980000, 3680000, 2900000, 90000, accent),
+		pptxTextBox(6, "Studio Label", 980000, 880000, 5200000, 320000, "EGGKID STUDIO · ENTERPRISE COPILOT", "93C5FD", 145000, true),
+		pptxTextBox(7, "Cover Title", 980000, 1540000, 7400000, 1900000, title, "FFFFFF", 540000, true),
+		pptxTextBox(8, "Cover Subtitle", 980000, 3820000, 7800000, 460000, subtitle, "BFDBFE", 205000, false)+detail.String()+pptxFooter(index, 64, accent),
+	)
+}
+
+func pptxSlideVisuals(index int, slide studioSlide, accent string) string {
+	switch slide.layout {
+	case "summary", "cards":
+		return pptxCardRow(50, 890000, 4200000, accent, []string{"Context", "Evidence", "Decision"})
+	case "flow":
+		return pptxFlowRow(50, accent, []string{"Configure", "Generate", "Preview", "Archive"})
+	case "timeline", "roadmap":
+		return pptxRoadmap(50, accent, []string{"Now", "Next", "Scale"})
+	case "risk":
+		return pptxRiskMatrix(50, accent)
+	default:
+		return pptxTextBox(50, "Slide Badge", 9100000, 980000, 1600000, 300000, fmt.Sprintf("0%d", index), accent, 180000, true)
+	}
+}
+
+func pptxCardRow(baseID, x, y int, accent string, labels []string) string {
+	var out strings.Builder
+	for i, label := range labels {
+		cardX := x + i*3360000
+		out.WriteString(pptxRect(baseID+i*3, label+" Card", cardX, y, 3000000, 980000, "F8FAFC"))
+		out.WriteString(pptxRect(baseID+i*3+1, label+" Accent", cardX, y, 3000000, 90000, accent))
+		out.WriteString(pptxTextBox(baseID+i*3+2, label+" Label", cardX+220000, y+230000, 2500000, 360000, label, "0F172A", 210000, true))
+	}
+	return out.String()
+}
+
+func pptxFlowRow(baseID int, accent string, labels []string) string {
+	var out strings.Builder
+	for i, label := range labels {
+		x := 920000 + i*2500000
+		out.WriteString(pptxRect(baseID+i*4, label+" Node", x, 4140000, 2050000, 860000, "EFF6FF"))
+		out.WriteString(pptxTextBox(baseID+i*4+1, label+" Number", x+180000, 4300000, 420000, 280000, fmt.Sprintf("%02d", i+1), accent, 170000, true))
+		out.WriteString(pptxTextBox(baseID+i*4+2, label+" Label", x+660000, 4290000, 1200000, 300000, label, "0F172A", 175000, true))
+		if i < len(labels)-1 {
+			out.WriteString(pptxRect(baseID+i*4+3, label+" Connector", x+2050000, 4510000, 450000, 70000, accent))
+		}
+	}
+	return out.String()
+}
+
+func pptxRoadmap(baseID int, accent string, labels []string) string {
+	var out strings.Builder
+	out.WriteString(pptxRect(baseID, "Roadmap Line", 1260000, 4580000, 8700000, 80000, "CBD5E1"))
+	for i, label := range labels {
+		x := 1460000 + i*3900000
+		out.WriteString(pptxRect(baseID+i*4+1, label+" Marker", x, 4330000, 580000, 580000, accent))
+		out.WriteString(pptxTextBox(baseID+i*4+2, label+" Label", x-260000, 5100000, 1150000, 300000, label, "0F172A", 180000, true))
+	}
+	return out.String()
+}
+
+func pptxRiskMatrix(baseID int, accent string) string {
+	return pptxRect(baseID, "Risk Matrix", 6500000, 2260000, 4000000, 2700000, "FEF2F2") +
+		pptxRect(baseID+1, "Risk Matrix Accent", 6500000, 2260000, 4000000, 100000, accent) +
+		pptxTextBox(baseID+2, "Risk High", 6820000, 2660000, 3300000, 360000, "High impact · needs fallback", "991B1B", 180000, true) +
+		pptxTextBox(baseID+3, "Risk Medium", 6820000, 3380000, 3300000, 360000, "Medium impact · monitor SLA", "B45309", 180000, true) +
+		pptxTextBox(baseID+4, "Risk Low", 6820000, 4100000, 3300000, 360000, "Low impact · document owner", "166534", 180000, true)
 }
 
 func pptxFooter(index, progress int, accent string) string {
@@ -720,65 +868,195 @@ func pptxEscape(value string) string {
 func renderStudioHTML(title, prompt string, version int) string {
 	escapedTitle := html.EscapeString(title)
 	escapedSummary := html.EscapeString(promptSummary(prompt))
+	points := studioPromptPoints(promptSummary(prompt), []string{
+		"Turn fragmented notes into a structured office deliverable.",
+		"Keep every output previewable, downloadable, versioned, and reusable.",
+		"Use trace, queue, and SLA signals to make slow tasks diagnosable.",
+	})
+	var pointCards strings.Builder
+	for i, point := range points {
+		pointCards.WriteString(fmt.Sprintf(`<article class="insight-card">
+          <span class="insight-card__index">0%d</span>
+          <p>%s</p>
+        </article>`, i+1, html.EscapeString(point)))
+	}
 	return fmt.Sprintf(`<!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>%s</title>
   <style>
-    :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { margin: 0; background: #f5f7fb; color: #172033; }
-    main { max-width: 1080px; margin: 0 auto; padding: 40px 20px; }
-    .hero { padding: 28px; border-radius: 28px; background: linear-gradient(135deg, #1f6feb, #8b5cf6); color: #fff; box-shadow: 0 24px 60px rgba(31, 111, 235, .22); }
-    .hero h1 { margin: 0 0 10px; font-size: 32px; }
-    .hero p { margin: 0; opacity: .9; line-height: 1.7; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: 22px; }
-    .card { background: #fff; border: 1px solid #e7ecf5; border-radius: 22px; padding: 20px; box-shadow: 0 14px 34px rgba(15, 23, 42, .06); }
-    .metric { font-size: 30px; font-weight: 800; color: #1f6feb; }
-    .label { color: #667085; font-size: 13px; }
-    .timeline { margin-top: 22px; display: grid; gap: 12px; }
-    .step { display: grid; grid-template-columns: 110px 1fr; gap: 14px; align-items: center; }
-    .bar { height: 10px; border-radius: 999px; background: #e9effb; overflow: hidden; }
-    .bar span { display: block; height: 100%%; border-radius: inherit; background: linear-gradient(90deg, #1f6feb, #22c55e); }
-    table { width: 100%%; border-collapse: collapse; margin-top: 12px; }
-    th, td { text-align: left; padding: 12px; border-bottom: 1px solid #edf1f7; }
-    th { color: #667085; font-size: 13px; }
+    :root {
+      color-scheme: light;
+      font-family: Inter, "SF Pro Display", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+      --ink: #0f172a;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --blue: #2563eb;
+      --violet: #7c3aed;
+      --green: #16a34a;
+      --amber: #f59e0b;
+      --paper: rgba(255, 255, 255, .88);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 12%% 8%%, rgba(37, 99, 235, .20), transparent 30%%),
+        radial-gradient(circle at 88%% 0%%, rgba(124, 58, 237, .18), transparent 28%%),
+        linear-gradient(180deg, #f8fafc 0%%, #eef4ff 100%%);
+      color: var(--ink);
+    }
+    main { max-width: 1180px; margin: 0 auto; padding: 42px 24px 56px; }
+    .hero {
+      position: relative;
+      overflow: hidden;
+      min-height: 360px;
+      padding: 42px;
+      border-radius: 34px;
+      background: linear-gradient(135deg, #0f172a 0%%, #172554 52%%, #312e81 100%%);
+      color: #fff;
+      box-shadow: 0 28px 80px rgba(15, 23, 42, .28);
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      right: -90px;
+      top: -120px;
+      width: 420px;
+      height: 420px;
+      border-radius: 999px;
+      background: linear-gradient(135deg, rgba(96, 165, 250, .65), rgba(168, 85, 247, .45));
+      filter: blur(4px);
+    }
+    .eyebrow {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 12px;
+      border: 1px solid rgba(191, 219, 254, .28);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, .10);
+      color: #bfdbfe;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    h1 { position: relative; z-index: 1; max-width: 760px; margin: 30px 0 18px; font-size: clamp(38px, 6vw, 70px); line-height: .98; letter-spacing: -.055em; }
+    .hero p { position: relative; z-index: 1; max-width: 760px; margin: 0; color: #dbeafe; font-size: 17px; line-height: 1.8; }
+    .hero-meta { position: relative; z-index: 1; display: flex; gap: 12px; flex-wrap: wrap; margin-top: 34px; }
+    .pill { padding: 10px 14px; border-radius: 999px; background: rgba(255,255,255,.13); color: #e0f2fe; font-size: 13px; }
+    .section { margin-top: 24px; }
+    .section-head { display: flex; justify-content: space-between; gap: 20px; align-items: end; margin: 36px 0 14px; }
+    .section-head h2 { margin: 0; font-size: 24px; letter-spacing: -.02em; }
+    .section-head p { max-width: 560px; margin: 0; color: var(--muted); line-height: 1.7; }
+    .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+    .metric-card, .panel, .insight-card, .step, .risk-card {
+      border: 1px solid rgba(148, 163, 184, .26);
+      background: var(--paper);
+      box-shadow: 0 18px 45px rgba(15, 23, 42, .08);
+      backdrop-filter: blur(18px);
+    }
+    .metric-card { padding: 22px; border-radius: 24px; }
+    .metric-card strong { display: block; font-size: 34px; letter-spacing: -.04em; }
+    .metric-card span { display: block; margin-top: 6px; color: var(--muted); font-size: 13px; }
+    .insights { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .insight-card { min-height: 156px; padding: 22px; border-radius: 26px; }
+    .insight-card__index { color: var(--blue); font-weight: 900; letter-spacing: .08em; }
+    .insight-card p { margin: 18px 0 0; color: #1e293b; line-height: 1.72; }
+    .workflow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .step { position: relative; padding: 22px; border-radius: 24px; overflow: hidden; }
+    .step::before { content: ""; position: absolute; left: 0; top: 0; right: 0; height: 5px; background: linear-gradient(90deg, var(--blue), var(--violet)); }
+    .step b { display: block; margin-bottom: 8px; font-size: 16px; }
+    .step p { margin: 0; color: var(--muted); line-height: 1.62; font-size: 13px; }
+    .two-col { display: grid; grid-template-columns: 1.2fr .8fr; gap: 16px; }
+    .panel { padding: 26px; border-radius: 28px; }
+    .panel h3 { margin: 0 0 14px; font-size: 20px; }
+    .roadmap { display: grid; gap: 14px; }
+    .roadmap-row { display: grid; grid-template-columns: 110px 1fr; gap: 14px; align-items: center; }
+    .bar { height: 12px; border-radius: 999px; background: #dbeafe; overflow: hidden; }
+    .bar span { display: block; height: 100%%; border-radius: inherit; background: linear-gradient(90deg, var(--blue), var(--green)); }
+    .risk-grid { display: grid; gap: 10px; }
+    .risk-card { display: flex; justify-content: space-between; gap: 18px; padding: 14px 16px; border-radius: 18px; }
+    .risk-card span { color: var(--muted); }
+    table { width: 100%%; border-collapse: collapse; overflow: hidden; border-radius: 20px; }
+    th, td { text-align: left; padding: 14px 12px; border-bottom: 1px solid #edf2f7; }
+    th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+    td { color: #1e293b; }
+    @media (max-width: 900px) {
+      .metrics, .insights, .workflow, .two-col { grid-template-columns: 1fr; }
+      .section-head { display: block; }
+      .hero { padding: 30px; }
+    }
   </style>
 </head>
 <body>
   <main>
     <section class="hero">
+      <span class="eyebrow">EggKid Studio · Enterprise Copilot</span>
       <h1>%s</h1>
       <p>%s</p>
+      <div class="hero-meta">
+        <span class="pill">Version v%d</span>
+        <span class="pill">Previewable HTML</span>
+        <span class="pill">Downloadable artifact</span>
+      </div>
     </section>
-    <section class="grid">
-      <div class="card"><div class="metric">v%d</div><div class="label">Current version</div></div>
-      <div class="card"><div class="metric">3</div><div class="label">Core artifact types</div></div>
-      <div class="card"><div class="metric">5</div><div class="label">Suggested follow-ups</div></div>
+    <section class="section metrics">
+      <article class="metric-card"><strong>4</strong><span>Studio output modes</span></article>
+      <article class="metric-card"><strong>7</strong><span>PPT-ready sections</span></article>
+      <article class="metric-card"><strong>100%%</strong><span>Downloadable records</span></article>
+      <article class="metric-card"><strong>v%d</strong><span>Current artifact version</span></article>
     </section>
-    <section class="card timeline">
-      <h2>Processing chain</h2>
-      <div class="step"><strong>Understand</strong><div class="bar"><span style="width: 96%%"></span></div></div>
-      <div class="step"><strong>Organize</strong><div class="bar"><span style="width: 78%%"></span></div></div>
-      <div class="step"><strong>Generate</strong><div class="bar"><span style="width: 88%%"></span></div></div>
-      <div class="step"><strong>Review</strong><div class="bar"><span style="width: 64%%"></span></div></div>
+    <section class="section">
+      <div class="section-head">
+        <h2>Key insights</h2>
+        <p>Studio turns the current prompt into reusable business material. These cards are intentionally concise so they can be lifted into PPT or a weekly report.</p>
+      </div>
+      <div class="insights">%s</div>
     </section>
-    <section class="card">
-      <h2>Action table</h2>
+    <section class="section workflow">
+      <article class="step"><b>01 · Understand</b><p>Read task intent, target audience, reference files, and output constraints.</p></article>
+      <article class="step"><b>02 · Structure</b><p>Convert loose notes into sections, decisions, risks, and next actions.</p></article>
+      <article class="step"><b>03 · Generate</b><p>Create real files such as PPTX, HTML, XLSX, and Markdown documents.</p></article>
+      <article class="step"><b>04 · Archive</b><p>Keep records versioned, downloadable, deletable, and ready for reuse.</p></article>
+    </section>
+    <section class="section two-col">
+      <article class="panel">
+        <h3>Execution roadmap</h3>
+        <div class="roadmap">
+          <div class="roadmap-row"><b>Now</b><div class="bar"><span style="width: 82%%"></span></div></div>
+          <div class="roadmap-row"><b>Next</b><div class="bar"><span style="width: 58%%"></span></div></div>
+          <div class="roadmap-row"><b>Scale</b><div class="bar"><span style="width: 36%%"></span></div></div>
+        </div>
+      </article>
+      <article class="panel">
+        <h3>Governance notes</h3>
+        <div class="risk-grid">
+          <div class="risk-card"><b>Large files</b><span>Async queue + trace</span></div>
+          <div class="risk-card"><b>Model failures</b><span>Retry + fallback</span></div>
+          <div class="risk-card"><b>Reuse</b><span>Version + template</span></div>
+        </div>
+      </article>
+    </section>
+    <section class="section panel">
+      <h3>Action table</h3>
       <table>
         <thead><tr><th>Item</th><th>Owner</th><th>Status</th><th>Advice</th></tr></thead>
         <tbody>
-          <tr><td>Fill business context</td><td>Owner</td><td>In progress</td><td>Attach source evidence</td></tr>
-          <tr><td>Polish page styling</td><td>Frontend</td><td>Todo</td><td>Align to enterprise design system</td></tr>
-          <tr><td>Review conclusions</td><td>Reviewer</td><td>Todo</td><td>Flag risks and sources</td></tr>
+          <tr><td>Fill business context</td><td>Owner</td><td>In progress</td><td>Attach source evidence and target audience.</td></tr>
+          <tr><td>Upgrade generator</td><td>Backend</td><td>Next</td><td>Connect configured LLM for content-aware output.</td></tr>
+          <tr><td>Review conclusions</td><td>Reviewer</td><td>Todo</td><td>Flag risks, confidential details, and missing sources.</td></tr>
         </tbody>
       </table>
     </section>
   </main>
 </body>
 </html>
-`, escapedTitle, escapedTitle, escapedSummary, version)
+`, escapedTitle, escapedTitle, escapedSummary, version, version, pointCards.String())
 }
 
 func renderStudioCSV(title, prompt string, version int) string {

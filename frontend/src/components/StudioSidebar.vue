@@ -269,10 +269,14 @@
 
     <t-dialog
       v-model:visible="previewVisible"
-      width="760px"
+      attach="body"
+      width="min(1120px, calc(100vw - 48px))"
+      :z-index="6200"
+      dialog-class-name="studio-preview-dialog"
       :header="previewArtifact?.title || '预览'"
       placement="center"
       :footer="false"
+      destroy-on-close
     >
       <div class="studio-preview">
         <div class="studio-preview__meta">
