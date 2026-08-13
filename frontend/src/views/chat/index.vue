@@ -10,6 +10,7 @@
         <StudioSidebar
             v-if="studioSidebarVisible"
             :disabled="isReplying"
+            :session-id="String(session_id || '')"
             @use-template="handleStudioTemplate"
             @collapse-change="handleStudioCollapseChange"
         />
