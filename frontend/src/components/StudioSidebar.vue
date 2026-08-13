@@ -1,9 +1,5 @@
 <template>
-  <aside
-    class="studio-sidebar"
-    :class="{ 'is-collapsed': collapsed }"
-    aria-label="Studio office workspace"
-  >
+  <aside class="studio-sidebar" :class="{ 'is-collapsed': collapsed }" aria-label="Studio workspace">
     <button
       type="button"
       class="studio-toggle"
@@ -17,32 +13,151 @@
 
     <transition name="studio-content-fade">
       <div v-if="!collapsed" class="studio-panel">
-        <header class="studio-header">
-          <div>
-            <p class="studio-eyebrow">Office Copilot</p>
-            <h2>办公产出工作台</h2>
-          </div>
-          <span class="studio-badge">Beta</span>
-        </header>
-
-        <section class="studio-section">
-          <div class="studio-section-head">
+        <template v-if="activeTool">
+          <header class="studio-workspace-header">
             <div>
-              <div class="studio-section-title">常用生成</div>
-              <p class="studio-section-desc">生成后会自动保存到下方记录，可预览和下载。</p>
+              <p class="studio-eyebrow">Workspace</p>
+              <h2>{{ activeTool.title }}</h2>
+              <p class="studio-section-desc">{{ activeTool.description }}</p>
             </div>
-          </div>
-          <div class="studio-card-grid studio-card-grid--primary">
-            <article
-              v-for="item in primaryItems"
-              :key="item.key"
-              class="studio-card studio-card--primary"
+            <div class="studio-workspace-actions">
+              <t-button variant="outline" size="small" @click="backToHome">返回</t-button>
+              <t-button v-if="activeTool.prompt" variant="outline" size="small" @click="sendPromptToChat">发到对话</t-button>
+            </div>
+          </header>
+
+          <section class="studio-section">
+            <div class="studio-section-title">任务说明</div>
+            <div class="studio-helper-box">
+              {{ activeTool.prompt }}
+            </div>
+          </section>
+
+          <section v-if="activeTool.artifactType" class="studio-section">
+            <div class="studio-section-title">生成配置</div>
+            <div class="studio-form-grid">
+              <div class="studio-field">
+                <label>标题</label>
+                <t-input v-model="form.title" :disabled="disabled" placeholder="例如：长鑫存储 AIX 周报" />
+              </div>
+
+              <div class="studio-field">
+                <label>受众</label>
+                <t-select v-model="form.audience" :disabled="disabled" :options="audienceOptions" placeholder="选择受众" />
+              </div>
+
+              <div class="studio-field">
+                <label>风格</label>
+                <t-select v-model="form.style" :disabled="disabled" :options="styleOptions" placeholder="选择风格" />
+              </div>
+
+              <div v-if="activeTool.artifactType === 'ppt'" class="studio-field">
+                <label>页数</label>
+                <t-input-number v-model="form.pageCount" :min="4" :max="20" :disabled="disabled" theme="column" />
+              </div>
+
+              <div v-if="activeTool.artifactType === 'doc'" class="studio-field">
+                <label>文档类型</label>
+                <t-select v-model="form.docType" :disabled="disabled" :options="docTypeOptions" />
+              </div>
+
+              <div v-if="activeTool.artifactType === 'html'" class="studio-field">
+                <label>页面主题</label>
+                <t-select v-model="form.htmlTheme" :disabled="disabled" :options="htmlThemeOptions" />
+              </div>
+
+              <div v-if="activeTool.artifactType === 'table'" class="studio-field studio-field--full">
+                <label>表头字段</label>
+                <t-input v-model="form.tableColumns" :disabled="disabled" placeholder="序号,模块,任务,负责人,状态,备注" />
+              </div>
+
+              <div v-if="activeTool.artifactType === 'table'" class="studio-field">
+                <label>预估行数</label>
+                <t-input-number v-model="form.tableRows" :min="3" :max="50" :disabled="disabled" theme="column" />
+              </div>
+
+              <div class="studio-field studio-field--full">
+                <label>补充信息</label>
+                <t-textarea
+                  v-model="form.notes"
+                  :disabled="disabled"
+                  :autosize="{ minRows: 4, maxRows: 8 }"
+                  placeholder="补充风格、重点、限制、必须包含的章节等"
+                />
+              </div>
+            </div>
+          </section>
+
+          <section v-if="activeTool.artifactType" class="studio-section">
+            <div class="studio-section-title">参考模板</div>
+            <div
+              class="studio-dropzone"
+              :class="{ 'is-dragover': isDragOver }"
+              @dragenter.prevent="isDragOver = true"
+              @dragover.prevent="isDragOver = true"
+              @dragleave.prevent="isDragOver = false"
+              @drop.prevent="handleDrop"
+              @click="openFilePicker"
             >
+              <input ref="referenceInputRef" type="file" class="studio-file-input" multiple @change="handleFileChange" />
+              <div class="studio-dropzone__icon">⇪</div>
+              <div class="studio-dropzone__text">
+                <strong>点击上传或拖拽到此处上传参考模板</strong>
+                <span>支持 .pptx / .docx / .xlsx / .md / .txt / .html 等，先上传名字和摘要，后续可扩展真模板解析。</span>
+              </div>
+            </div>
+
+            <div v-if="referenceTemplates.length > 0" class="studio-reference-list">
+              <article v-for="item in referenceTemplates" :key="item.key" class="studio-reference-item">
+                <div class="studio-reference-item__main">
+                  <div class="studio-reference-item__title">{{ item.name }}</div>
+                  <div class="studio-reference-item__meta">
+                    {{ formatBytes(item.size) }} · {{ item.kind || 'file' }}
+                  </div>
+                  <div v-if="item.summary" class="studio-reference-item__summary">{{ item.summary }}</div>
+                </div>
+                <button type="button" class="studio-reference-item__remove" @click="removeReference(item.key)">移除</button>
+              </article>
+            </div>
+
+            <div class="studio-upload-actions">
+              <t-button size="small" variant="outline" :disabled="referenceTemplates.length === 0" @click="clearReferences">清空模板</t-button>
+            </div>
+          </section>
+
+          <section class="studio-section">
+            <div class="studio-section-title">生成说明</div>
+            <div class="studio-helper-box">
+              {{ generationPreview }}
+            </div>
+            <div class="studio-upload-actions">
+              <t-button theme="primary" :loading="generating" :disabled="disabled" @click="generateArtifact">
+                {{ generating ? '生成中' : '开始生成' }}
+              </t-button>
+              <t-button variant="outline" :disabled="disabled" @click="sendPromptToChat">把配置发到对话</t-button>
+            </div>
+          </section>
+        </template>
+
+        <template v-else>
+          <header class="studio-header">
+            <div>
+              <p class="studio-eyebrow">Office Copilot</p>
+              <h2>办公产出工作台</h2>
+            </div>
+            <span class="studio-badge">Beta</span>
+          </header>
+
+          <section class="studio-section">
+            <div class="studio-section-title">常用生成</div>
+            <div class="studio-card-grid studio-card-grid--primary">
               <button
+                v-for="item in primaryItems"
+                :key="item.key"
                 type="button"
-                class="studio-card__main"
+                class="studio-card"
                 :disabled="disabled"
-                @click="useTemplate(item)"
+                @click="openTool(item)"
               >
                 <span class="studio-card__icon">{{ item.icon }}</span>
                 <span class="studio-card__body">
@@ -50,38 +165,29 @@
                   <span class="studio-card__desc">{{ item.description }}</span>
                 </span>
               </button>
-              <button
-                type="button"
-                class="studio-card__generate"
-                :disabled="disabled || generatingType === item.key"
-                @click="generateArtifact(item)"
-              >
-                <t-icon v-if="generatingType === item.key" name="loading" class="studio-spin" />
-                <span>{{ generatingType === item.key ? '生成中' : '生成文件' }}</span>
-              </button>
-            </article>
-          </div>
-        </section>
+            </div>
+          </section>
 
-        <section class="studio-section">
-          <div class="studio-section-title">辅助分析</div>
-          <div class="studio-card-grid studio-card-grid--secondary">
-            <button
-              v-for="item in secondaryItems"
-              :key="item.key"
-              type="button"
-              class="studio-card studio-card--flat"
-              :disabled="disabled"
-              @click="useTemplate(item)"
-            >
-              <span class="studio-card__icon">{{ item.icon }}</span>
-              <span class="studio-card__body">
-                <span class="studio-card__title">{{ item.title }}</span>
-                <span class="studio-card__desc">{{ item.description }}</span>
-              </span>
-            </button>
-          </div>
-        </section>
+          <section class="studio-section">
+            <div class="studio-section-title">辅助分析</div>
+            <div class="studio-card-grid studio-card-grid--secondary">
+              <button
+                v-for="item in secondaryItems"
+                :key="item.key"
+                type="button"
+                class="studio-card studio-card--flat"
+                :disabled="disabled"
+                @click="openTool(item)"
+              >
+                <span class="studio-card__icon">{{ item.icon }}</span>
+                <span class="studio-card__body">
+                  <span class="studio-card__title">{{ item.title }}</span>
+                  <span class="studio-card__desc">{{ item.description }}</span>
+                </span>
+              </button>
+            </div>
+          </section>
+        </template>
 
         <section class="studio-section studio-records">
           <div class="studio-section-head">
@@ -116,7 +222,7 @@
 
           <div v-if="recordsLoading && artifacts.length === 0" class="studio-empty">正在加载记录…</div>
           <div v-else-if="artifacts.length === 0" class="studio-empty">
-            还没有生成记录。先点上面的“生成文件”，这里就会长出小仓库。
+            还没有生成记录。先打开一个工具，填点信息再点“开始生成”。
           </div>
           <div v-else class="studio-record-list">
             <article v-for="artifact in artifacts" :key="artifact.id" class="studio-record">
@@ -151,7 +257,7 @@
 
         <div class="studio-footer">
           <span class="studio-footer__dot"></span>
-          点卡片主体会把任务模板发送到对话；点“生成文件”会保存为 Studio 记录。
+          现在是“工具内部界面”模式了：先配置，再生成，再记录。
         </div>
       </div>
     </transition>
@@ -181,7 +287,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import {
   batchDeleteStudioArtifacts,
@@ -204,6 +310,14 @@ interface StudioItem {
   artifactType?: StudioArtifactType
 }
 
+interface ReferenceTemplate {
+  key: string
+  name: string
+  size: number
+  kind: string
+  summary: string
+}
+
 const emit = defineEmits<{
   (event: 'use-template', prompt: string): void
   (event: 'collapse-change', collapsed: boolean): void
@@ -216,15 +330,62 @@ const props = defineProps({
 
 const STORAGE_KEY = 'eggkid-studio-sidebar-collapsed'
 const collapsed = ref(false)
+const activeToolKey = ref<StudioItem['key'] | null>(null)
 const artifacts = ref<StudioArtifact[]>([])
 const selectedIds = ref<Set<string>>(new Set())
 const recordsLoading = ref(false)
 const deleting = ref(false)
-const generatingType = ref<string>('')
+const generating = ref(false)
 const regeneratingId = ref('')
 const previewVisible = ref(false)
 const previewArtifact = ref<StudioArtifact | null>(null)
 const previewContent = ref('')
+const isDragOver = ref(false)
+const referenceInputRef = ref<HTMLInputElement | null>(null)
+const referenceTemplates = ref<ReferenceTemplate[]>([])
+
+const form = reactive({
+  title: '',
+  audience: '部门同事',
+  style: '正式',
+  pageCount: 10,
+  docType: '周报',
+  htmlTheme: '简洁科技',
+  tableColumns: '序号,模块,任务,负责人,状态,备注',
+  tableRows: 8,
+  notes: '',
+})
+
+const audienceOptions = [
+  { label: '部门同事', value: '部门同事' },
+  { label: '直属领导', value: '直属领导' },
+  { label: '管理层', value: '管理层' },
+  { label: '项目评审', value: '项目评审' },
+  { label: '面试展示', value: '面试展示' },
+]
+
+const styleOptions = [
+  { label: '正式', value: '正式' },
+  { label: '简洁', value: '简洁' },
+  { label: '科技感', value: '科技感' },
+  { label: '咨询风', value: '咨询风' },
+  { label: '复盘风', value: '复盘风' },
+]
+
+const docTypeOptions = [
+  { label: '周报', value: '周报' },
+  { label: '会议纪要', value: '会议纪要' },
+  { label: 'SOP', value: 'SOP' },
+  { label: '项目复盘', value: '项目复盘' },
+  { label: '邮件', value: '邮件' },
+]
+
+const htmlThemeOptions = [
+  { label: '简洁科技', value: '简洁科技' },
+  { label: '仪表盘', value: '仪表盘' },
+  { label: '流程看板', value: '流程看板' },
+  { label: '汇报风', value: '汇报风' },
+]
 
 const primaryItems: StudioItem[] = [
   {
@@ -233,12 +394,7 @@ const primaryItems: StudioItem[] = [
     icon: '📊',
     title: 'PPT 制作',
     description: '沉淀汇报大纲、项目复盘、方案评审结构',
-    prompt: `请作为企业办公汇报助手，基于当前对话和知识库内容，生成一份 PPT 方案。
-要求：
-1. 给出标题、受众、汇报目标；
-2. 输出 8-12 页页面结构；
-3. 每页包含页面标题、核心观点、三条以内要点、建议图表/配图；
-4. 最后给出讲稿提示和可能被问到的问题。`,
+    prompt: '请生成一份企业汇报 PPT 方案，包含封面、背景、目标、方案、风险和下一步。',
   },
   {
     key: 'html',
@@ -246,13 +402,7 @@ const primaryItems: StudioItem[] = [
     icon: '🧩',
     title: 'HTML 页面',
     description: '生成可预览的单页看板、流程图或说明页',
-    prompt: `请作为前端 Artifact 助手，生成一个完整、可运行的 HTML 单文件。
-要求：
-1. 只使用 HTML/CSS/JavaScript；
-2. 页面适合企业内部汇报或知识展示；
-3. 视觉简洁，包含响应式布局；
-4. 如适合，请加入流程图、表格或指标卡片；
-5. 说明如何保存为 .html 并打开预览。`,
+    prompt: '请生成一个可直接打开的 HTML 单文件，适合企业内部展示。',
   },
   {
     key: 'table',
@@ -260,12 +410,7 @@ const primaryItems: StudioItem[] = [
     icon: '📋',
     title: '表格生成',
     description: '生成任务跟进表、风险清单、需求拆解 CSV',
-    prompt: `请作为企业表格助手，把当前任务整理成结构化表格。
-建议字段：序号、模块、任务、负责人、优先级、状态、截止时间、风险、备注。
-要求：
-1. 字段清晰、适合复制到 Excel；
-2. 对不确定信息用“待补充”标记；
-3. 最后补充你建议我继续追问或补齐的关键信息。`,
+    prompt: '请把当前任务整理成适合 Excel 的结构化表格。',
   },
   {
     key: 'doc',
@@ -273,14 +418,7 @@ const primaryItems: StudioItem[] = [
     icon: '📝',
     title: '办公文档',
     description: '周报、会议纪要、邮件、SOP、复盘草稿',
-    prompt: `请作为企业办公文档助手，先判断当前任务适合输出日报、周报、会议纪要、邮件、SOP 还是项目复盘。
-然后按所选文档类型输出：
-1. 标题；
-2. 背景/目标；
-3. 关键事项；
-4. 风险与阻塞；
-5. 下一步计划；
-6. 可直接复制使用的正式版本。`,
+    prompt: '请生成一份适合企业办公场景的正式文档草稿。',
   },
 ]
 
@@ -290,39 +428,44 @@ const secondaryItems: StudioItem[] = [
     icon: '🔎',
     title: '知识溯源',
     description: '整理引用片段、命中文档和可信度',
-    prompt: `请作为 RAG 知识溯源助手，基于当前回答或检索结果，整理一份“知识溯源说明”。
-请输出：
-1. 回答中最关键的 5 个结论；
-2. 每个结论对应的来源文档/片段；
-3. 哪些结论证据充分，哪些仍需要人工确认；
-4. 如有冲突信息，请列出冲突点和建议处理方式。`,
+    prompt: '请整理回答中的关键结论、来源片段和冲突点。',
   },
   {
     key: 'parse-trace',
     icon: '⏱️',
     title: '解析 Trace',
     description: '复盘解析、后处理、索引各节点耗时',
-    prompt: `请作为知识库解析链路 Trace 分析助手，帮我设计或复盘一次文档入库流程。
-请按节点输出：
-1. 文件接收；
-2. 文档解析（如 MinerU/PDF/Office）；
-3. 清洗与后处理；
-4. Chunk 切分；
-5. Embedding；
-6. Rerank/索引建立；
-7. Wiki 摘要/实体概念抽取；
-8. 完成或失败原因。
-每个节点包含：状态、预估耗时、可能失败原因、排查建议。`,
+    prompt: '请设计一个文档入库 Trace，包含解析、清洗、切块、Embedding、Rerank 等节点。',
   },
 ]
 
+const activeTool = computed(() => [...primaryItems, ...secondaryItems].find((item) => item.key === activeToolKey.value) || null)
+const activeArtifactType = computed(() => activeTool.value?.artifactType || '')
+const recordFilterType = computed(() => activeArtifactType.value || '')
 const recordSummary = computed(() => {
   if (artifacts.value.length === 0) return '暂无记录'
   return `共 ${artifacts.value.length} 条，已选择 ${selectedIds.value.size} 条`
 })
+const allVisibleSelected = computed(() => artifacts.value.length > 0 && artifacts.value.every((item) => selectedIds.value.has(item.id)))
 
-const allVisibleSelected = computed(() => {
-  return artifacts.value.length > 0 && artifacts.value.every((item) => selectedIds.value.has(item.id))
+const generationPreview = computed(() => {
+  if (!activeTool.value) return ''
+  if (!activeArtifactType.value) return '当前是辅助分析工具，主要用于把思路整理成可发送到对话的提示词。'
+  const refText = referenceTemplates.value.length
+    ? referenceTemplates.value.map((item) => `- ${item.name} (${item.kind})`).join('\n')
+    : '- 无参考模板'
+  return [
+    `标题：${form.title || activeTool.value.title}`,
+    `受众：${form.audience}`,
+    `风格：${form.style}`,
+    activeArtifactType.value === 'ppt' ? `页数：${form.pageCount}` : '',
+    activeArtifactType.value === 'doc' ? `文档类型：${form.docType}` : '',
+    activeArtifactType.value === 'html' ? `主题：${form.htmlTheme}` : '',
+    activeArtifactType.value === 'table' ? `表头：${form.tableColumns}` : '',
+    activeArtifactType.value === 'table' ? `预估行数：${form.tableRows}` : '',
+    form.notes ? `补充：${form.notes}` : '补充：无',
+    `参考模板：\n${refText}`,
+  ].filter(Boolean).join('\n')
 })
 
 const toggleCollapsed = () => {
@@ -331,14 +474,90 @@ const toggleCollapsed = () => {
   emit('collapse-change', collapsed.value)
 }
 
-const useTemplate = (item: StudioItem) => {
-  emit('use-template', item.prompt)
+const resetFormForTool = (tool: StudioItem) => {
+  form.title = tool.title
+  form.audience = '部门同事'
+  form.style = '正式'
+  form.pageCount = 10
+  form.docType = '周报'
+  form.htmlTheme = '简洁科技'
+  form.tableColumns = '序号,模块,任务,负责人,状态,备注'
+  form.tableRows = 8
+  form.notes = ''
+  referenceTemplates.value = []
+}
+
+const openTool = (tool: StudioItem) => {
+  activeToolKey.value = tool.key
+  resetFormForTool(tool)
+  void loadArtifacts()
+}
+
+const backToHome = () => {
+  activeToolKey.value = null
+  selectedIds.value = new Set()
+  referenceTemplates.value = []
+  previewVisible.value = false
+}
+
+const sendPromptToChat = () => {
+  if (!activeTool.value) return
+  emit('use-template', buildPrompt())
+}
+
+const buildPrompt = () => {
+  if (!activeTool.value) return ''
+  const refs = referenceTemplates.value.length
+    ? referenceTemplates.value.map((item) => `- ${item.name}: ${item.summary || 'no summary'}`).join('\n')
+    : '- none'
+  const common = [
+    `任务类型：${activeTool.value.title}`,
+    `目标受众：${form.audience}`,
+    `内容风格：${form.style}`,
+    form.notes ? `补充要求：${form.notes}` : '',
+    `参考模板：\n${refs}`,
+  ].filter(Boolean)
+
+  if (!activeArtifactType.value) {
+    return [activeTool.value.prompt, ...common].join('\n')
+  }
+
+  if (activeArtifactType.value === 'ppt') {
+    return [
+      activeTool.value.prompt,
+      ...common,
+      `请输出 ${form.pageCount} 页结构，包含封面、背景、目标、方案、风险、总结和 Q&A。`,
+    ].join('\n')
+  }
+  if (activeArtifactType.value === 'html') {
+    return [
+      activeTool.value.prompt,
+      ...common,
+      `页面主题：${form.htmlTheme}`,
+      '请输出完整可运行的单文件 HTML，并说明如何预览。',
+    ].join('\n')
+  }
+  if (activeArtifactType.value === 'table') {
+    return [
+      activeTool.value.prompt,
+      ...common,
+      `表头字段：${form.tableColumns}`,
+      `预估行数：${form.tableRows}`,
+      '请输出 CSV 格式内容。',
+    ].join('\n')
+  }
+  return [
+    activeTool.value.prompt,
+    ...common,
+    `文档类型：${form.docType}`,
+  ].join('\n')
 }
 
 const loadArtifacts = async () => {
   recordsLoading.value = true
   try {
-    const res = await listStudioArtifacts({ limit: 30 })
+    const params = recordFilterType.value ? { type: recordFilterType.value, limit: 30 } : { limit: 30 }
+    const res = await listStudioArtifacts(params)
     artifacts.value = res.data?.items || []
     const visibleIDs = new Set(artifacts.value.map((item) => item.id))
     selectedIds.value = new Set([...selectedIds.value].filter((id) => visibleIDs.has(id)))
@@ -349,23 +568,24 @@ const loadArtifacts = async () => {
   }
 }
 
-const generateArtifact = async (item: StudioItem) => {
-  if (!item.artifactType) return
-  generatingType.value = item.key
+const generateArtifact = async () => {
+  if (!activeTool.value || !activeArtifactType.value) return
+  generating.value = true
   try {
+    const prompt = buildPrompt()
     await createStudioArtifact({
-      type: item.artifactType,
-      title: item.title,
-      prompt: item.prompt,
+      type: activeArtifactType.value,
+      title: form.title || activeTool.value.title,
+      prompt,
       session_id: props.sessionId,
       source: 'studio',
     })
-    MessagePlugin.success(`${item.title} 已生成`)
+    MessagePlugin.success(`${activeTool.value.title} 已生成`)
     await loadArtifacts()
   } catch (error: any) {
     MessagePlugin.error(error?.message || '生成失败')
   } finally {
-    generatingType.value = ''
+    generating.value = false
   }
 }
 
@@ -455,6 +675,81 @@ const downloadArtifactRecord = async (artifact: StudioArtifact) => {
   }
 }
 
+const openFilePicker = () => {
+  referenceInputRef.value?.click()
+}
+
+const summarizeFile = async (file: File) => {
+  const name = file.name
+  const kind = file.type || name.split('.').pop() || 'file'
+  const isTextLike = /^(text\/|application\/json|application\/xml|application\/csv|application\/javascript)/i.test(file.type)
+    || /\.(md|txt|csv|json|xml|html?|css|js|ts|tsx|vue)$/i.test(name)
+  if (!isTextLike) {
+    return {
+      key: `${name}-${file.lastModified}`,
+      name,
+      size: file.size,
+      kind,
+      summary: '',
+    }
+  }
+  try {
+    const text = await file.text()
+    const summary = text.replace(/\s+/g, ' ').trim().slice(0, 220)
+    return {
+      key: `${name}-${file.lastModified}`,
+      name,
+      size: file.size,
+      kind,
+      summary,
+    }
+  } catch {
+    return {
+      key: `${name}-${file.lastModified}`,
+      name,
+      size: file.size,
+      kind,
+      summary: '',
+    }
+  }
+}
+
+const addFiles = async (files: FileList | File[]) => {
+  const list = Array.from(files)
+  if (list.length === 0) return
+  const items = await Promise.all(list.map((file) => summarizeFile(file)))
+  const seen = new Set(referenceTemplates.value.map((item) => item.key))
+  for (const item of items) {
+    if (!seen.has(item.key)) {
+      referenceTemplates.value.push(item)
+    }
+  }
+}
+
+const handleFileChange = async (event: Event) => {
+  const input = event.target as HTMLInputElement
+  if (input.files) {
+    await addFiles(input.files)
+    input.value = ''
+  }
+  isDragOver.value = false
+}
+
+const handleDrop = async (event: DragEvent) => {
+  isDragOver.value = false
+  if (event.dataTransfer?.files) {
+    await addFiles(event.dataTransfer.files)
+  }
+}
+
+const removeReference = (key: string) => {
+  referenceTemplates.value = referenceTemplates.value.filter((item) => item.key !== key)
+}
+
+const clearReferences = () => {
+  referenceTemplates.value = []
+}
+
 const typeLabel = (type: StudioArtifactType) => {
   switch (type) {
     case 'html':
@@ -487,12 +782,20 @@ const formatTime = (value: string) => {
   })
 }
 
+watch(activeArtifactType, () => {
+  if (activeTool.value?.artifactType) {
+    void loadArtifacts()
+  }
+})
+
 onMounted(() => {
   collapsed.value = localStorage.getItem(STORAGE_KEY) === '1'
   emit('collapse-change', collapsed.value)
-  if (!collapsed.value) {
-    loadArtifacts()
-  }
+  void loadArtifacts()
+})
+
+onBeforeUnmount(() => {
+  selectedIds.value = new Set()
 })
 </script>
 
@@ -503,7 +806,7 @@ onMounted(() => {
   right: 16px;
   bottom: 132px;
   z-index: 30;
-  width: 340px;
+  width: 360px;
   pointer-events: none;
 }
 
@@ -527,13 +830,6 @@ onMounted(() => {
   justify-content: space-between;
   gap: 8px;
   backdrop-filter: blur(14px);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
-
-  &:hover {
-    border-color: var(--td-brand-color);
-    box-shadow: 0 14px 36px rgba(15, 23, 42, 0.12);
-    transform: translateY(-1px);
-  }
 }
 
 .studio-toggle__spark {
@@ -570,6 +866,7 @@ onMounted(() => {
 }
 
 .studio-header,
+.studio-workspace-header,
 .studio-section-head {
   display: flex;
   justify-content: space-between;
@@ -577,15 +874,19 @@ onMounted(() => {
   align-items: flex-start;
 }
 
-.studio-header {
-  margin-bottom: 18px;
+.studio-header h2,
+.studio-workspace-header h2 {
+  margin: 4px 0 0;
+  font-size: 18px;
+  line-height: 1.35;
+  color: var(--td-text-color-primary);
+}
 
-  h2 {
-    margin: 4px 0 0;
-    font-size: 18px;
-    line-height: 1.35;
-    color: var(--td-text-color-primary);
-  }
+.studio-workspace-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
 }
 
 .studio-eyebrow,
@@ -628,6 +929,140 @@ onMounted(() => {
   color: var(--td-text-color-secondary);
 }
 
+.studio-helper-box {
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--td-bg-color-page);
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.studio-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.studio-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.studio-field--full {
+  grid-column: 1 / -1;
+}
+
+.studio-field label {
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+  font-weight: 600;
+}
+
+.studio-dropzone {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border: 1px dashed var(--td-component-stroke);
+  border-radius: 16px;
+  background: var(--td-bg-color-page);
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease;
+
+  &.is-dragover {
+    border-color: var(--td-brand-color);
+    background: var(--td-brand-color-light);
+  }
+}
+
+.studio-dropzone__icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--td-bg-color-container);
+  color: var(--td-brand-color);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.studio-dropzone__text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  strong {
+    font-size: 13px;
+  }
+
+  span {
+    font-size: 12px;
+    color: var(--td-text-color-secondary);
+    line-height: 1.5;
+  }
+}
+
+.studio-file-input {
+  display: none;
+}
+
+.studio-reference-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.studio-reference-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
+}
+
+.studio-reference-item__main {
+  min-width: 0;
+}
+
+.studio-reference-item__title {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.studio-reference-item__meta,
+.studio-reference-item__summary {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+  line-height: 1.5;
+}
+
+.studio-reference-item__summary {
+  white-space: pre-wrap;
+}
+
+.studio-reference-item__remove {
+  border: 0;
+  background: transparent;
+  color: var(--td-error-color);
+  cursor: pointer;
+}
+
+.studio-upload-actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .studio-card-grid {
   display: grid;
   gap: 10px;
@@ -645,61 +1080,16 @@ onMounted(() => {
   border-radius: 16px;
   background: color-mix(in srgb, var(--td-bg-color-container) 86%, var(--td-brand-color-light) 14%);
   color: var(--td-text-color-primary);
-  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
-
-  &:hover {
-    border-color: var(--td-brand-color);
-    background: var(--td-bg-color-container-hover);
-  }
-}
-
-.studio-card--primary {
-  overflow: hidden;
-}
-
-.studio-card__main,
-.studio-card--flat {
-  width: 100%;
-  padding: 12px;
-  border: 0;
-  background: transparent;
-  text-align: left;
   cursor: pointer;
+  text-align: left;
   display: flex;
   gap: 12px;
   align-items: flex-start;
-  color: inherit;
-
-  &:disabled {
-    cursor: not-allowed;
-    opacity: 0.55;
-  }
+  padding: 12px;
 }
 
 .studio-card--flat {
-  border: 1px solid var(--td-component-stroke);
-}
-
-.studio-card__generate {
-  width: calc(100% - 24px);
-  margin: 0 12px 12px;
-  height: 30px;
-  border: 0;
-  border-radius: 10px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  background: var(--td-brand-color-light);
-  color: var(--td-brand-color);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-
-  &:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
+  background: var(--td-bg-color-container);
 }
 
 .studio-card__icon {
@@ -768,11 +1158,6 @@ onMounted(() => {
   color: var(--td-error-color);
   cursor: pointer;
   font-size: 12px;
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
 }
 
 .studio-empty {
@@ -797,10 +1182,6 @@ onMounted(() => {
   border: 1px solid var(--td-component-stroke);
   border-radius: 14px;
   background: var(--td-bg-color-container);
-}
-
-.studio-record__check {
-  padding-top: 2px;
 }
 
 .studio-record__top,
@@ -852,11 +1233,6 @@ onMounted(() => {
     color: var(--td-brand-color);
     font-size: 12px;
     cursor: pointer;
-
-    &:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
 
     &.danger {
       color: var(--td-error-color);
@@ -963,7 +1339,7 @@ onMounted(() => {
     top: 88px;
     right: 12px;
     bottom: 118px;
-    width: min(340px, calc(100vw - 24px));
+    width: min(360px, calc(100vw - 24px));
   }
 
   .studio-sidebar:not(.is-collapsed) {
@@ -977,6 +1353,10 @@ onMounted(() => {
     right: 10px;
     bottom: 104px;
     width: min(310px, calc(100vw - 20px));
+  }
+
+  .studio-form-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>
