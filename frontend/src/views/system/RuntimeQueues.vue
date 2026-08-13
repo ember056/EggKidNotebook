@@ -97,6 +97,66 @@
         </div>
       </section>
 
+      <section class="rq-stability" :class="`rq-stability--${stabilityTone}`">
+        <div class="rq-stability-score">
+          <div class="rq-stability-ring">
+            <t-progress
+              theme="circle"
+              size="72px"
+              :percentage="stabilityScore"
+              :status="stabilityProgressStatus"
+            />
+          </div>
+          <div>
+            <span class="rq-stability-kicker">企业稳定性雷达</span>
+            <h3>{{ stabilityStatusLabel }}</h3>
+            <p>{{ stabilitySummary }}</p>
+          </div>
+        </div>
+
+        <div class="rq-stability-grid">
+          <article
+            v-for="risk in stabilityRisks"
+            :key="risk.key"
+            class="rq-stability-risk"
+            :class="`rq-stability-risk--${risk.tone}`"
+          >
+            <div class="rq-stability-risk-main">
+              <span class="rq-stability-risk-icon">
+                <t-icon :name="risk.icon" />
+              </span>
+              <div>
+                <h4>{{ risk.label }}</h4>
+                <p>{{ risk.description }}</p>
+              </div>
+            </div>
+            <t-button
+              v-if="risk.queueName && risk.taskState"
+              variant="text"
+              size="small"
+              @click="openRiskTarget(risk)"
+            >
+              {{ risk.actionLabel || '查看任务' }}
+              <template #suffix><t-icon name="chevron-right" /></template>
+            </t-button>
+          </article>
+        </div>
+
+        <div v-if="hotQueues.length > 0" class="rq-hot-queues">
+          <span class="rq-hot-queues-label">重点队列</span>
+          <button
+            v-for="queue in hotQueues"
+            :key="queue.name"
+            type="button"
+            class="rq-hot-queue"
+            @click="openRuntimeTasks(queue, preferredQueueState(queue))"
+          >
+            <span>{{ queueLabel(queue.name) }}</span>
+            <em>{{ queueRiskText(queue) }}</em>
+          </button>
+        </div>
+      </section>
+
       <section class="rq-pools">
         <div class="rq-pools-header">
           <div>
@@ -577,6 +637,17 @@ const runtimeTaskTypeKeys: Record<string, string> = {
   'wiki:finalize': 'wikiFinalize',
 }
 
+interface StabilityRisk {
+  key: string
+  label: string
+  description: string
+  tone: 'success' | 'warning' | 'danger' | 'info'
+  icon: string
+  queueName?: string
+  taskState?: RuntimeTaskState
+  actionLabel?: string
+}
+
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let tasksScrollObserver: IntersectionObserver | null = null
 let tasksRequestID = 0
@@ -614,8 +685,146 @@ const totalActive = computed(() => queues.value.reduce((s, q) => s + q.active, 0
 const totalPending = computed(() => queues.value.reduce((s, q) => s + q.pending, 0))
 const totalRetry = computed(() => queues.value.reduce((s, q) => s + q.retry, 0))
 const totalArchived = computed(() => queues.value.reduce((s, q) => s + q.archived, 0))
+const totalScheduled = computed(() => queues.value.reduce((s, q) => s + q.scheduled, 0))
+const totalModelWaiting = computed(() => models.value.reduce((s, m) => s + m.waiting, 0))
+const totalWorkerCapacity = computed(() => pools.value.reduce((s, p) => s + (p.cluster_capacity || p.concurrency || 0), 0))
 const taskQueueLabel = computed(() => taskQueue.value ? queueLabel(taskQueue.value.name) : '')
 const taskStateGuide = computed(() => t(`system.globalSettings.runtime.tasks.guides.${taskState.value}`))
+
+const hotQueues = computed(() =>
+  [...queues.value]
+    .filter((q) => q.archived > 0 || q.retry > 0 || q.pending > 0 || q.scheduled > 0 || q.active > 0)
+    .sort((a, b) => queueRiskScore(b) - queueRiskScore(a))
+    .slice(0, 4),
+)
+
+const mostFailedQueue = computed(() =>
+  queues.value.filter((q) => q.archived > 0).sort((a, b) => b.archived - a.archived)[0] || null,
+)
+
+const mostRetryQueue = computed(() =>
+  queues.value.filter((q) => q.retry > 0).sort((a, b) => b.retry - a.retry)[0] || null,
+)
+
+const mostBacklogQueue = computed(() =>
+  queues.value
+    .filter((q) => q.pending + q.scheduled > 0)
+    .sort((a, b) => (b.pending + b.scheduled) - (a.pending + a.scheduled))[0] || null,
+)
+
+const saturatedPools = computed(() =>
+  pools.value.filter((pool) => {
+    const capacity = pool.cluster_capacity || pool.concurrency || 0
+    return capacity > 0 && pool.active >= capacity
+  }),
+)
+
+const stabilityScore = computed(() => {
+  let score = 100
+  score -= Math.min(35, totalArchived.value * 7)
+  score -= Math.min(22, totalRetry.value * 4)
+  score -= Math.min(18, Math.floor(totalPending.value / 5) * 3)
+  score -= Math.min(12, totalScheduled.value > 20 ? 8 : Math.floor(totalScheduled.value / 10) * 3)
+  score -= Math.min(12, totalModelWaiting.value * 3)
+  if (totalWorkerCapacity.value === 0 && (totalPending.value > 0 || totalActive.value > 0)) score -= 18
+  if (saturatedPools.value.length > 0 && (totalPending.value > 0 || totalRetry.value > 0)) score -= 10
+  return Math.max(0, Math.min(100, score))
+})
+
+const stabilityTone = computed<'success' | 'warning' | 'danger'>(() => {
+  if (stabilityScore.value >= 85) return 'success'
+  if (stabilityScore.value >= 60) return 'warning'
+  return 'danger'
+})
+
+const stabilityProgressStatus = computed<'success' | 'warning' | 'error'>(() => {
+  if (stabilityTone.value === 'success') return 'success'
+  if (stabilityTone.value === 'warning') return 'warning'
+  return 'error'
+})
+
+const stabilityStatusLabel = computed(() => {
+  if (stabilityTone.value === 'success') return '运行平稳'
+  if (stabilityTone.value === 'warning') return '存在积压风险'
+  return '需要立即治理'
+})
+
+const stabilitySummary = computed(() => {
+  if (stabilityTone.value === 'success') return '队列、Worker 和模型限流状态整体健康，适合继续批量解析或知识库构建。'
+  if (totalArchived.value > 0) return '已有任务进入失败归档，建议先查看失败原因，再决定重试、删除或调整解析/模型配置。'
+  if (totalRetry.value > 0) return '存在自动重试任务，系统可能正在反复尝试同一批解析或后处理任务。'
+  if (totalPending.value > 0 || totalScheduled.value > 0) return '存在等待任务，建议关注 Worker 容量、模型限流和大文档解析耗时。'
+  return '当前有运行中任务，请观察活跃队列和模型并发是否长期满载。'
+})
+
+const stabilityRisks = computed<StabilityRisk[]>(() => {
+  const risks: StabilityRisk[] = []
+  if (mostFailedQueue.value) {
+    risks.push({
+      key: 'archived',
+      label: `${totalArchived.value} 个失败归档任务`,
+      description: `${queueLabel(mostFailedQueue.value.name)} 是当前失败最多的队列。失败归档通常代表重试已耗尽，需要人工处理。`,
+      tone: 'danger',
+      icon: 'error-circle',
+      queueName: mostFailedQueue.value.name,
+      taskState: 'archived',
+      actionLabel: '查看失败',
+    })
+  }
+  if (mostRetryQueue.value) {
+    risks.push({
+      key: 'retry',
+      label: `${totalRetry.value} 个重试中任务`,
+      description: `${queueLabel(mostRetryQueue.value.name)} 正在重试。若数量反复上涨，可能是解析服务、模型 API 或存储链路不稳定。`,
+      tone: 'warning',
+      icon: 'refresh',
+      queueName: mostRetryQueue.value.name,
+      taskState: 'retry',
+      actionLabel: '查看重试',
+    })
+  }
+  if (mostBacklogQueue.value) {
+    const backlog = mostBacklogQueue.value.pending + mostBacklogQueue.value.scheduled
+    risks.push({
+      key: 'backlog',
+      label: `${backlog} 个等待任务`,
+      description: `${queueLabel(mostBacklogQueue.value.name)} 当前等待最多。大文档上传后，可用这里判断是否只是排队而不是卡死。`,
+      tone: backlog > 20 ? 'warning' : 'info',
+      icon: 'queue',
+      queueName: mostBacklogQueue.value.name,
+      taskState: mostBacklogQueue.value.pending > 0 ? 'pending' : 'scheduled',
+      actionLabel: '查看积压',
+    })
+  }
+  if (totalModelWaiting.value > 0) {
+    risks.push({
+      key: 'model-waiting',
+      label: `${totalModelWaiting.value} 个模型调用等待`,
+      description: 'Embedding、Rerank 或多模态模型限流正在生效。高并发解析时，这是保护模型服务不被打爆的关键指标。',
+      tone: 'warning',
+      icon: 'server',
+    })
+  }
+  if (saturatedPools.value.length > 0) {
+    risks.push({
+      key: 'pool-saturated',
+      label: `${saturatedPools.value.length} 个 Worker 池满载`,
+      description: `满载池：${saturatedPools.value.map((pool) => poolLabel(pool.name)).join('、')}。如果同时有等待队列，建议扩容 Worker 或降低单批上传量。`,
+      tone: 'warning',
+      icon: 'chart-bubble',
+    })
+  }
+  if (!risks.length) {
+    risks.push({
+      key: 'healthy',
+      label: '暂无明显风险',
+      description: '当前没有失败归档、重试积压或明显排队。可以继续观察 Trace 中单文件耗时，定位慢解析阶段。',
+      tone: 'success',
+      icon: 'check-circle',
+    })
+  }
+  return risks.slice(0, 5)
+})
 
 // Friendly per-queue label lives in i18n; falls back to the raw queue
 // name so a queue added on the backend still renders before translations
@@ -636,6 +845,40 @@ function queueMeta(row: QueueStat): string {
     return `${scope} · ${t('system.globalSettings.runtime.weightShort', { value: row.weight })}`
   }
   return scope
+}
+
+function queueRiskScore(row: QueueStat): number {
+  return row.archived * 100
+    + row.retry * 60
+    + row.pending * 12
+    + row.scheduled * 8
+    + row.active * 4
+}
+
+function preferredQueueState(row: QueueStat): RuntimeTaskState {
+  if (row.archived > 0) return 'archived'
+  if (row.retry > 0) return 'retry'
+  if (row.pending > 0) return 'pending'
+  if (row.scheduled > 0) return 'scheduled'
+  if (row.active > 0) return 'active'
+  return 'completed'
+}
+
+function queueRiskText(row: QueueStat): string {
+  const parts: string[] = []
+  if (row.archived > 0) parts.push(`失败 ${row.archived}`)
+  if (row.retry > 0) parts.push(`重试 ${row.retry}`)
+  if (row.pending > 0) parts.push(`等待 ${row.pending}`)
+  if (row.scheduled > 0) parts.push(`计划 ${row.scheduled}`)
+  if (row.active > 0) parts.push(`运行 ${row.active}`)
+  return parts.join(' · ') || '空闲'
+}
+
+function openRiskTarget(risk: StabilityRisk) {
+  if (!risk.queueName || !risk.taskState) return
+  const queue = queues.value.find((item) => item.name === risk.queueName)
+  if (!queue) return
+  openRuntimeTasks(queue, risk.taskState)
 }
 
 function runtimeTaskTypeLabel(type: string): string {
@@ -1234,6 +1477,183 @@ onUnmounted(() => {
 
 .rq-metric--danger .rq-metric-value {
   color: var(--td-error-color);
+}
+
+.rq-stability {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.85fr) minmax(0, 1.35fr);
+  gap: 14px;
+  margin: -16px 0 30px;
+  padding: 14px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--td-brand-color-light) 34%, transparent), transparent 46%),
+    var(--td-bg-color-container);
+  box-shadow: 0 16px 42px rgba(15, 23, 42, 0.05);
+}
+
+.rq-stability--success {
+  border-color: color-mix(in srgb, var(--td-success-color) 24%, var(--td-component-stroke));
+}
+
+.rq-stability--warning {
+  border-color: color-mix(in srgb, var(--td-warning-color) 28%, var(--td-component-stroke));
+}
+
+.rq-stability--danger {
+  border-color: color-mix(in srgb, var(--td-error-color) 28%, var(--td-component-stroke));
+}
+
+.rq-stability-score {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--td-bg-color-secondarycontainer);
+
+  h3 {
+    margin: 3px 0 6px;
+    color: var(--td-text-color-primary);
+    font-size: 18px;
+    line-height: 1.25;
+  }
+
+  p {
+    margin: 0;
+    color: var(--td-text-color-secondary);
+    font-size: 12px;
+    line-height: 1.55;
+  }
+}
+
+.rq-stability-ring {
+  flex: 0 0 auto;
+}
+
+.rq-stability-kicker {
+  color: var(--td-brand-color);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.rq-stability-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+
+.rq-stability-risk {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 12px;
+  background: var(--td-bg-color-container);
+
+  h4 {
+    margin: 0 0 4px;
+    color: var(--td-text-color-primary);
+    font-size: 13px;
+    line-height: 1.35;
+  }
+
+  p {
+    margin: 0;
+    color: var(--td-text-color-secondary);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+}
+
+.rq-stability-risk-main {
+  display: flex;
+  min-width: 0;
+  gap: 9px;
+}
+
+.rq-stability-risk-icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--td-brand-color);
+  background: var(--td-brand-color-light);
+}
+
+.rq-stability-risk--success .rq-stability-risk-icon {
+  color: var(--td-success-color);
+  background: var(--td-success-color-1);
+}
+
+.rq-stability-risk--warning .rq-stability-risk-icon {
+  color: var(--td-warning-color);
+  background: var(--td-warning-color-1);
+}
+
+.rq-stability-risk--danger .rq-stability-risk-icon {
+  color: var(--td-error-color);
+  background: var(--td-error-color-1);
+}
+
+.rq-hot-queues {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 2px;
+}
+
+.rq-hot-queues-label {
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+}
+
+.rq-hot-queue {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 280px;
+  padding: 5px 9px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 999px;
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-primary);
+  cursor: pointer;
+  transition: border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+
+  span,
+  em {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  span {
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  em {
+    color: var(--td-text-color-secondary);
+    font-size: 12px;
+    font-style: normal;
+  }
+
+  &:hover {
+    border-color: var(--td-brand-color);
+    color: var(--td-brand-color);
+    box-shadow: 0 8px 18px rgba(0, 82, 217, 0.1);
+  }
 }
 
 .rq-pools {
