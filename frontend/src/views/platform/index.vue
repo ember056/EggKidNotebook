@@ -156,10 +156,18 @@ const isStudioDropTarget = (event: DragEvent): boolean => {
         });
 }
 
+const releaseGlobalDropMask = () => {
+    dragCounter = 0;
+    ismask.value = false;
+}
+
 // 全局拖拽事件处理
 const handleGlobalDragEnter = (event: DragEvent) => {
     if (!isFileDrag(event)) return;
-    if (isStudioDropTarget(event)) return;
+    if (isStudioDropTarget(event)) {
+        releaseGlobalDropMask();
+        return;
+    }
     event.preventDefault();
     dragCounter++;
     if (event.dataTransfer) {
@@ -170,7 +178,10 @@ const handleGlobalDragEnter = (event: DragEvent) => {
 
 const handleGlobalDragOver = (event: DragEvent) => {
     if (!isFileDrag(event)) return;
-    if (isStudioDropTarget(event)) return;
+    if (isStudioDropTarget(event)) {
+        releaseGlobalDropMask();
+        return;
+    }
     event.preventDefault();
     if (event.dataTransfer) {
         event.dataTransfer.dropEffect = 'copy';
@@ -179,7 +190,10 @@ const handleGlobalDragOver = (event: DragEvent) => {
 
 const handleGlobalDragLeave = (event: DragEvent) => {
     if (!isFileDrag(event)) return;
-    if (isStudioDropTarget(event)) return;
+    if (isStudioDropTarget(event)) {
+        releaseGlobalDropMask();
+        return;
+    }
     event.preventDefault();
     dragCounter--;
     if (dragCounter === 0) {
@@ -189,7 +203,10 @@ const handleGlobalDragLeave = (event: DragEvent) => {
 
 const handleGlobalDrop = async (event: DragEvent) => {
     if (!isFileDrag(event)) return;
-    if (isStudioDropTarget(event)) return;
+    if (isStudioDropTarget(event)) {
+        releaseGlobalDropMask();
+        return;
+    }
     event.preventDefault();
     dragCounter = 0;
     ismask.value = false;
@@ -298,6 +315,7 @@ onUnmounted(() => {
     width: 100%;
     height: 100%;
     z-index: 999;
+    pointer-events: none;
     display: flex;
     justify-content: center;
     align-items: center;

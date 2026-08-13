@@ -1048,6 +1048,8 @@ onBeforeRouteUpdate((to, from, next) => {
 </script>
 <style lang="less" scoped>
 .chat {
+    --chat-studio-reserve: 0px;
+    --chat-content-width: min(960px, calc(100vw - 340px - var(--chat-studio-reserve)));
     font-size: 20px;
     // 右侧不留 padding，滚动条贴到内容区最右缘
     padding: 0 0 20px 20px;
@@ -1067,6 +1069,7 @@ onBeforeRouteUpdate((to, from, next) => {
 
     &.is-sidebar-collapsed {
         max-width: calc(100vw - 60px);
+        --chat-content-width: min(960px, calc(100vw - 140px - var(--chat-studio-reserve)));
     }
 
     &.is-embedded {
@@ -1084,14 +1087,16 @@ onBeforeRouteUpdate((to, from, next) => {
 
     &.has-studio-sidebar:not(.is-embedded) {
         @media (min-width: 1280px) {
-            padding-right: 348px;
+            --chat-studio-reserve: 392px;
+            padding-right: var(--chat-studio-reserve);
             box-sizing: border-box;
         }
     }
 
     &.has-studio-sidebar.is-studio-collapsed:not(.is-embedded) {
         @media (min-width: 1280px) {
-            padding-right: 64px;
+            --chat-studio-reserve: 84px;
+            padding-right: var(--chat-studio-reserve);
         }
     }
 
@@ -1104,6 +1109,7 @@ onBeforeRouteUpdate((to, from, next) => {
     &.has-references-panel:not(.is-embedded) {
         @media (min-width: 960px) {
             padding-right: 420px;
+            --chat-studio-reserve: 420px;
             box-sizing: border-box;
 
             .chat_scroll_box {
@@ -1253,7 +1259,7 @@ onBeforeRouteUpdate((to, from, next) => {
     flex-shrink: 0;
     margin: 0 auto;
     width: 100%;
-    max-width: 960px;
+    max-width: var(--chat-content-width);
     box-sizing: border-box;
     position: relative;
 
@@ -1272,7 +1278,7 @@ onBeforeRouteUpdate((to, from, next) => {
     display: flex;
     flex-direction: column;
     gap: 16px;
-    max-width: 960px;
+    max-width: var(--chat-content-width);
     flex: 1;
     margin: 0 auto;
     width: 100%;

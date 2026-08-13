@@ -260,22 +260,26 @@ const handleKBEditorSuccess = (kbId: string) => {
 </script>
 <style lang="less" scoped>
 .dialogue-wrap {
+    --dialogue-studio-reserve: 392px;
+    --dialogue-content-width: min(960px, calc(100vw - 340px - var(--dialogue-studio-reserve)));
     flex: 1;
     display: flex;
     justify-content: center;
     align-items: center;
     box-sizing: border-box;
-    padding-right: 348px;
+    padding-right: var(--dialogue-studio-reserve);
     transition: padding-right 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
     // position: relative;
 
     &.is-studio-collapsed {
-        padding-right: 64px;
+        --dialogue-studio-reserve: 84px;
     }
 }
 
 @media (max-width: 1279px) {
     .dialogue-wrap {
+        --dialogue-studio-reserve: 0px;
+        --dialogue-content-width: min(960px, calc(100vw - 48px));
         padding-right: 0;
     }
 }
@@ -285,12 +289,17 @@ const handleKBEditorSuccess = (kbId: string) => {
     flex-flow: column;
     align-items: center;
     width: 100%;
-    max-width: 960px;
+    max-width: var(--dialogue-content-width);
     gap: 24px;
 
     :deep(.answers-input) {
         position: static;
         transform: translateX(0);
+        width: 100%;
+    }
+
+    :deep(.rich-input-container) {
+        max-width: 100%;
     }
 }
 
@@ -334,9 +343,11 @@ const handleKBEditorSuccess = (kbId: string) => {
 }
 
 .suggested-questions-container {
-    max-width: 960px;
+    width: 100%;
+    max-width: var(--dialogue-content-width);
     margin: 0;
     padding: 0 16px;
+    box-sizing: border-box;
     transition: height 0.35s @suggested-ease;
 }
 
@@ -392,45 +403,6 @@ const handleKBEditorSuccess = (kbId: string) => {
     }
 }
 
-@media (max-width: 1250px) and (min-width: 1045px) {
-    .answers-input {
-        transform: translateX(-329px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 654px !important;
-    }
-}
-
-@media (max-width: 1045px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 500px !important;
-    }
-}
-
-@media (max-width: 750px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 340px !important;
-    }
-}
-
-@media (max-width: 600px) {
-    .answers-input {
-        transform: translateX(-250px);
-    }
-
-    :deep(.t-textarea__inner) {
-        width: 300px !important;
-    }
-}
 </style>
 <style lang="less">
 .del-menu-popup {
