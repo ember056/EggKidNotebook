@@ -460,6 +460,25 @@
                 <span class="rq-failed-row-stat">
                   {{ t('system.globalSettings.runtime.tasks.attempts', { current: task.retried + 1, max: task.max_retry + 1 }) }}
                 </span>
+                <template v-if="taskSLAAgeText(task)">
+                  <span class="rq-failed-row-sep" aria-hidden="true">·</span>
+                  <span class="rq-failed-row-stat">{{ taskSLAAgeText(task) }}</span>
+                </template>
+              </div>
+              <div
+                v-if="runtimeTaskDiagnostics(task).length > 0"
+                class="rq-task-diagnostics"
+              >
+                <span
+                  v-for="diag in runtimeTaskDiagnostics(task)"
+                  :key="diag.key"
+                  class="rq-task-diagnostic"
+                  :class="`rq-task-diagnostic--${diag.tone}`"
+                  :title="diag.suggestion"
+                >
+                  <t-icon :name="diag.icon" />
+                  <span>{{ diag.label }}</span>
+                </span>
               </div>
               <dl v-if="runtimeTaskMeta(task).length > 0" class="rq-failed-row-refs">
                 <div v-for="ref in runtimeTaskMeta(task)" :key="ref.key" class="rq-failed-ref">
@@ -467,7 +486,18 @@
                   <dd :title="ref.value">{{ ref.value }}</dd>
                 </div>
               </dl>
-              <p v-else class="rq-failed-row-unknown">
+              <ul
+                v-if="runtimeTaskDiagnostics(task).some((diag) => diag.suggestion)"
+                class="rq-task-sla-tips"
+              >
+                <li
+                  v-for="diag in runtimeTaskDiagnostics(task).filter((item) => item.suggestion)"
+                  :key="diag.key"
+                >
+                  {{ diag.suggestion }}
+                </li>
+              </ul>
+              <p v-if="runtimeTaskMeta(task).length === 0" class="rq-failed-row-unknown">
                 {{ t('system.globalSettings.runtime.tasks.unknownTarget') }}
               </p>
               <p v-if="task.last_error" class="rq-failed-row-error">
@@ -894,6 +924,14 @@ interface RuntimeTaskMeta {
   value: string
 }
 
+interface RuntimeTaskDiagnostic {
+  key: string
+  label: string
+  tone: 'info' | 'warning' | 'danger'
+  icon: string
+  suggestion?: string
+}
+
 function taskStateLabel(state: RuntimeTaskState): string {
   return t(`system.globalSettings.runtime.tasks.states.${state}`)
 }
@@ -916,6 +954,128 @@ function formatTaskTime(value?: string): string {
     second: '2-digit',
     hour12: false,
   })
+}
+
+function parseTaskTime(value?: string): number {
+  if (!value) return 0
+  const time = new Date(value).getTime()
+  return Number.isNaN(time) ? 0 : time
+}
+
+function runtimeTaskAgeMs(task: RuntimeTask): number {
+  const anchors = [
+    task.started_at,
+    task.enqueued_at,
+    task.next_process_at,
+    task.last_failed_at,
+    task.completed_at,
+  ]
+  const time = anchors.map(parseTaskTime).find((value) => value > 0) || 0
+  if (!time) return 0
+  return Math.max(0, Date.now() - time)
+}
+
+function formatSLAAge(ms: number): string {
+  if (!ms || ms < 0) return ''
+  const seconds = Math.floor(ms / 1000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  const remMinutes = minutes % 60
+  if (hours < 24) return remMinutes > 0 ? `${hours}h ${remMinutes}m` : `${hours}h`
+  const days = Math.floor(hours / 24)
+  const remHours = hours % 24
+  return remHours > 0 ? `${days}d ${remHours}h` : `${days}d`
+}
+
+function taskSLAAgeText(task: RuntimeTask): string {
+  const age = runtimeTaskAgeMs(task)
+  if (!age) return ''
+  if (task.state === 'active') return `运行 ${formatSLAAge(age)}`
+  if (task.state === 'pending') return `排队 ${formatSLAAge(age)}`
+  if (task.state === 'scheduled' || task.state === 'retry') return `等待 ${formatSLAAge(age)}`
+  if (task.state === 'archived') return `失败 ${formatSLAAge(age)}`
+  return ''
+}
+
+function isParseLikeTask(task: RuntimeTask): boolean {
+  return task.type.includes('document')
+    || task.type.includes('wiki')
+    || task.type.includes('knowledge')
+    || Boolean(task.knowledge_id || task.knowledge_base_id)
+}
+
+function runtimeTaskDiagnostics(task: RuntimeTask): RuntimeTaskDiagnostic[] {
+  const diagnostics: RuntimeTaskDiagnostic[] = []
+  const age = runtimeTaskAgeMs(task)
+  const ageText = formatSLAAge(age)
+  const parseLike = isParseLikeTask(task)
+  const retryRatio = task.max_retry >= 0 ? (task.retried + 1) / (task.max_retry + 1) : 0
+
+  if (task.is_orphaned) {
+    diagnostics.push({
+      key: 'orphaned',
+      label: '疑似孤儿任务',
+      tone: 'danger',
+      icon: 'error-triangle',
+      suggestion: '该任务可能已经没有活跃 Worker 接管。建议先刷新确认；若持续存在，优先取消或删除后重新触发解析。',
+    })
+  }
+
+  if (task.state === 'active' && age >= 30 * 60 * 1000) {
+    diagnostics.push({
+      key: 'long-active',
+      label: `运行过久 ${ageText}`,
+      tone: age >= 2 * 60 * 60 * 1000 ? 'danger' : 'warning',
+      icon: 'time',
+      suggestion: parseLike
+        ? '解析任务运行时间较长。大 PDF/扫描件可打开单文件 Trace 查看是否卡在文档解析、OCR、后处理或索引阶段。'
+        : '任务运行时间较长。建议结合 Worker 日志和下游服务健康状态判断是否需要取消后重试。',
+    })
+  }
+
+  if ((task.state === 'pending' || task.state === 'scheduled') && age >= 20 * 60 * 1000) {
+    diagnostics.push({
+      key: 'long-waiting',
+      label: `排队过久 ${ageText}`,
+      tone: age >= 60 * 60 * 1000 ? 'danger' : 'warning',
+      icon: 'queue',
+      suggestion: '任务等待较久，多数情况是 Worker 容量不足、模型限流等待或前面有大文件占住队列。可先看上方稳定性雷达的重点队列和 Worker 池。',
+    })
+  }
+
+  if (task.state === 'retry' || retryRatio >= 0.6) {
+    diagnostics.push({
+      key: 'retry-heavy',
+      label: `重试 ${task.retried + 1}/${task.max_retry + 1}`,
+      tone: retryRatio >= 0.85 || task.state === 'archived' ? 'danger' : 'warning',
+      icon: 'refresh',
+      suggestion: '该任务已经多次尝试。若错误相同，继续重试收益不高，建议先修复模型/API/解析服务/文件格式问题后再重跑。',
+    })
+  }
+
+  if (task.state === 'archived') {
+    diagnostics.push({
+      key: 'dead-letter',
+      label: '已进入失败归档',
+      tone: 'danger',
+      icon: 'close-circle',
+      suggestion: '失败归档表示自动重试已结束。请查看 last_error，确认原因后选择重试、删除记录或调整配置。',
+    })
+  }
+
+  if (parseLike && task.state === 'active' && age >= 10 * 60 * 1000 && !diagnostics.some((item) => item.key === 'long-active')) {
+    diagnostics.push({
+      key: 'large-doc-watch',
+      label: `大文档观察 ${ageText}`,
+      tone: 'info',
+      icon: 'file-1',
+      suggestion: '这是知识库/文档类任务，运行超过 10 分钟建议打开对应文件 Trace，观察解析、后处理、索引各阶段耗时。',
+    })
+  }
+
+  return diagnostics
 }
 
 function runtimeTaskMeta(task: RuntimeTask): RuntimeTaskMeta[] {
@@ -2235,6 +2395,49 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums;
 }
 
+.rq-task-diagnostics {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.rq-task-diagnostic {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  gap: 4px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+
+  span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.rq-task-diagnostic--info {
+  color: var(--td-brand-color);
+  background: var(--td-brand-color-light);
+}
+
+.rq-task-diagnostic--warning {
+  color: var(--td-warning-color);
+  background: var(--td-warning-color-1);
+}
+
+.rq-task-diagnostic--danger {
+  color: var(--td-error-color);
+  background: var(--td-error-color-1);
+}
+
 .rq-failed-row-refs {
   display: flex;
   flex-direction: column;
@@ -2274,6 +2477,20 @@ onUnmounted(() => {
   color: var(--td-text-color-placeholder);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.rq-task-sla-tips {
+  margin: 6px 0 0;
+  padding: 7px 9px 7px 24px;
+  border-radius: 8px;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font-size: 11px;
+  line-height: 1.55;
+
+  li + li {
+    margin-top: 3px;
+  }
 }
 
 .rq-failed-row-error {
